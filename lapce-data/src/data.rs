@@ -288,7 +288,12 @@ impl LapceData {
         );
         order.insert(
             PanelPosition::BottomLeft,
-            im::vector![PanelKind::Terminal, PanelKind::Search, PanelKind::Problem,],
+            im::vector![
+                PanelKind::Terminal,
+                PanelKind::Search,
+                PanelKind::Problem,
+                PanelKind::LspIo,
+            ],
         );
 
         order
@@ -629,6 +634,7 @@ pub struct LapceTabData {
     pub plugin: Arc<PluginData>,
     pub picker: Arc<FilePickerData>,
     pub file_explorer: Arc<FileExplorerData>,
+    pub lsp_io_id: Arc<WidgetId>,
     #[data(ignore)]
     pub proxy: Arc<LapceProxy>,
     pub proxy_status: Arc<ProxyStatus>,
@@ -853,6 +859,7 @@ impl LapceTabData {
             plugin,
             problem,
             search,
+            lsp_io_id: Arc::new(WidgetId::next()),
             find: Arc::new(Find::new(0)),
             picker: file_picker,
             source_control,
@@ -1629,6 +1636,9 @@ impl LapceTabData {
             LapceWorkbenchCommand::ToggleTerminalVisual => {
                 self.toggle_panel_visual(ctx, PanelKind::Terminal);
             }
+            LapceWorkbenchCommand::ToggleLspIoVisual => {
+                self.toggle_panel_visual(ctx, PanelKind::LspIo);
+            }
             LapceWorkbenchCommand::TogglePanelVisual => {
                 if let Some(data) = data {
                     if let Ok(kind) = serde_json::from_value::<PanelKind>(data) {
@@ -1662,6 +1672,9 @@ impl LapceTabData {
             }
             LapceWorkbenchCommand::ToggleTerminalFocus => {
                 self.toggle_panel_focus(ctx, PanelKind::Terminal);
+            }
+            LapceWorkbenchCommand::ToggleLspIoFocus => {
+                self.toggle_panel_focus(ctx, PanelKind::LspIo);
             }
             LapceWorkbenchCommand::TogglePanelFocus => {
                 if let Some(data) = data {
@@ -2152,6 +2165,7 @@ impl LapceTabData {
             PanelKind::Terminal => self.terminal.widget_id,
             PanelKind::Search => self.search.active,
             PanelKind::Problem => self.problem.widget_id,
+            PanelKind::LspIo => self.lsp_io_id,
         };
         if let PanelKind::Search = kind {
             ctx.submit_command(Command::new(
@@ -2182,7 +2196,10 @@ impl LapceTabData {
 
     fn toggle_panel_focus(&mut self, ctx: &mut EventCtx, kind: PanelKind) {
         let should_hide = match kind {
-            PanelKind::FileExplorer | PanelKind::Plugin | PanelKind::Problem => {
+            PanelKind::FileExplorer
+            | PanelKind::Plugin
+            | PanelKind::Problem
+            | PanelKind::LspIo => {
                 // Some panels don't accept focus (yet). Fall back to visibility check
                 // in those cases.
                 self.panel.is_panel_visible(&kind)

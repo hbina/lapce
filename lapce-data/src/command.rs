@@ -385,6 +385,10 @@ pub enum LapceWorkbenchCommand {
     #[strum(serialize = "toggle_terminal_focus")]
     ToggleTerminalFocus,
 
+    #[strum(message = "Toggle LSP I/O Focus")]
+    #[strum(serialize = "toggle_lspio_focus")]
+    ToggleLspIoFocus,
+
     #[strum(serialize = "toggle_source_control_focus")]
     ToggleSourceControlFocus,
 
@@ -419,6 +423,9 @@ pub enum LapceWorkbenchCommand {
 
     #[strum(serialize = "toggle_problem_visual")]
     ToggleProblemVisual,
+
+    #[strum(serialize = "toggle_lsp_visual")]
+    ToggleLspIoVisual,
 
     #[strum(serialize = "toggle_search_visual")]
     ToggleSearchVisual,

@@ -189,6 +189,12 @@ impl LapceTab {
                             WidgetPod::new(new_problem_panel(&data.problem).boxed()),
                         );
                     }
+                    PanelKind::LspIo => {
+                        panel.insert_panel(
+                            *kind,
+                            WidgetPod::new(new_problem_panel(&data.problem).boxed()),
+                        );
+                    }
                 }
             }
         }

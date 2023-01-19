@@ -13,6 +13,7 @@ pub enum PanelKind {
     Terminal,
     Search,
     Problem,
+    LspIo,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -34,6 +35,7 @@ impl PanelKind {
             PanelKind::Terminal => LapceIcons::TERMINAL,
             PanelKind::Search => LapceIcons::SEARCH,
             PanelKind::Problem => LapceIcons::PROBLEM,
+            PanelKind::LspIo => LapceIcons::LIGHTBULB,
         }
     }
 }
