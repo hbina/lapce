@@ -1058,6 +1058,12 @@ impl Widget<LapceTabData> for PluginInfo {
 
             (info_width, height)
         } else {
+            self.name_text_layout = None;
+            self.desc_text_layout = None;
+            self.author_text_layout = None;
+            self.version_text_layout = None;
+            self.repo_text_layout = None;
+
             (0.0, 0.0)
         };
 

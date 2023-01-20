@@ -348,7 +348,7 @@ impl<T: Data, W: Widget<T>> Widget<T> for ClipBox<T, W> {
 
             let mut visible = ctx.region().clone();
             visible += offset;
-            ctx.with_child_ctx(visible, |ctx| self.child.paint_raw(ctx, data, env));
+            ctx.with_child_ctx(visible, |ctx| self.child.paint(ctx, data, env));
         });
     }
 }

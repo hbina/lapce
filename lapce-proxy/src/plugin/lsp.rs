@@ -184,11 +184,12 @@ impl LspClient {
         let stdout = process.stdout.take().unwrap();
         let stderr = process.stderr.take().unwrap();
 
-        let mut writer = Box::new(BufWriter::new(stdin));
         let (io_tx, io_rx) = crossbeam_channel::unbounded();
         let server_rpc = PluginServerRpcHandler::new(volt_id.clone(), io_tx.clone());
         thread::spawn(move || {
+            let mut writer = Box::new(BufWriter::new(stdin));
             for msg in io_rx {
+                // println!("message to LSP\n{:#?}", msg);
                 if let Ok(msg) = serde_json::to_string(&msg) {
                     let msg =
                         format!("Content-Length: {}\r\n\r\n{}", msg.len(), msg);
@@ -205,6 +206,7 @@ impl LspClient {
             loop {
                 match read_message(&mut reader) {
                     Ok(message_str) => {
+                        // println!("message from LSP\n{}", message_str);
                         if let Some(resp) = handle_plugin_server_message(
                             &local_server_rpc,
                             &message_str,

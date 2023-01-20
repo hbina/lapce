@@ -41,6 +41,7 @@ struct ImageCacheEntry {
 pub struct ImageCache {
     images: im::HashMap<Url, ImageCacheEntry>,
 }
+
 impl ImageCache {
     /// Loads the given url, and submits the `ImageLoaded` event to the event sink when it's done.  
     /// You can use [`ImageCache::get`] to get the image's status, and content once it is finished.

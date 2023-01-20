@@ -25,6 +25,7 @@ pub enum LayoutContent {
     BrokenImage { text: TextLayout<RichText> },
     Separator { width: f64 },
 }
+
 impl LayoutContent {
     // TODO: Add configuration for whether it should allow loading local file urls
     // (And it would be desirable to have them be fine-grained enough to allow previewing
@@ -253,7 +254,7 @@ pub fn layouts_from_contents<'a>(
         .as_deref()
         .and_then(|p| Url::from_directory_path(p).ok());
     let base_url = base_url.as_ref();
-    let mut layouts = Vec::new();
+    let mut layouts = Vec::with_capacity(items.size_hint().0);
 
     for content in items {
         layouts.push(LayoutContent::from_content(
