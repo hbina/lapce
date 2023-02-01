@@ -10,6 +10,7 @@ use std::{
 
 use anyhow::{anyhow, Result};
 use crossbeam_channel::Sender;
+use globset::{Glob, GlobMatcher};
 use jsonrpc_lite::{Id, Params};
 use lapce_core::meta;
 use lapce_rpc::plugin::VoltID;
@@ -159,7 +160,7 @@ impl LspClient {
     #[allow(clippy::too_many_arguments)]
     fn new(
         plugin_rpc: PluginCatalogRpcHandler,
-        document_selector: DocumentSelector,
+        document_selector: Vec<FileFilter>,
         workspace: Option<PathBuf>,
         volt_id: VoltID,
         volt_display_name: String,
@@ -271,7 +272,7 @@ impl LspClient {
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         plugin_rpc: PluginCatalogRpcHandler,
-        document_selector: DocumentSelector,
+        document_selector: Vec<FileFilter>,
         workspace: Option<PathBuf>,
         volt_id: VoltID,
         volt_display_name: String,
@@ -388,28 +389,61 @@ impl LspClient {
     }
 }
 
-pub struct DocumentFilter {
+pub enum FileFilter {
     /// The document must have this language id, if it exists
-    pub language_id: Option<String>,
+    Language(String),
     /// The document's path must match this glob, if it exists
-    pub pattern: Option<globset::GlobMatcher>,
+    Pattern(GlobMatcher),
     // TODO: URI Scheme from lsp-types document filter
 }
-impl DocumentFilter {
+
+impl FileFilter {
+    pub fn language_from<S>(str: S) -> FileFilter
+    where
+        S: Into<String>,
+    {
+        FileFilter::Language(str.into())
+    }
+
+    pub fn pattern_from<S>(str: S) -> Option<FileFilter>
+    where
+        S: AsRef<str>,
+    {
+        Glob::new(str.as_ref())
+            .ok()
+            .map(|x| FileFilter::Pattern(Glob::compile_matcher(&x)))
+    }
+
     /// Constructs a document filter from the LSP version
     /// This ignores any fields that are badly constructed
     pub(crate) fn from_lsp_filter_loose(
         filter: &lsp_types::DocumentFilter,
-    ) -> DocumentFilter {
-        DocumentFilter {
-            language_id: filter.language.clone(),
-            // TODO: clean this up
-            pattern: filter
-                .pattern
-                .as_deref()
-                .map(globset::Glob::new)
-                .and_then(Result::ok)
-                .map(|x| globset::Glob::compile_matcher(&x)),
+    ) -> impl Iterator<Item = FileFilter> + '_ {
+        filter
+            .language
+            .iter()
+            .map(|l| FileFilter::Language(l.to_string()))
+            .chain(
+                filter
+                    .pattern
+                    .as_deref()
+                    .map(Glob::new)
+                    .and_then(Result::ok)
+                    .map(|x| FileFilter::Pattern(Glob::compile_matcher(&x))),
+            )
+    }
+
+    pub fn matches_any(
+        &self,
+        language_id: Option<&str>,
+        path: Option<&Path>,
+    ) -> bool {
+        match self {
+            FileFilter::Language(l) => Some(l.as_str()) == language_id,
+            FileFilter::Pattern(g) => match path {
+                Some(p) => g.is_match(p),
+                None => false,
+            },
         }
     }
 }

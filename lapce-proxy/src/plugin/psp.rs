@@ -34,9 +34,9 @@ use lsp_types::{
         WorkDoneProgressCreate, WorkspaceSymbol,
     },
     CodeActionProviderCapability, DidChangeTextDocumentParams,
-    DidSaveTextDocumentParams, DocumentSelector, HoverProviderCapability,
-    LogMessageParams, OneOf, ProgressParams, PublishDiagnosticsParams, Range,
-    Registration, RegistrationParams, SemanticTokens, SemanticTokensLegend,
+    DidSaveTextDocumentParams, HoverProviderCapability, LogMessageParams, OneOf,
+    ProgressParams, PublishDiagnosticsParams, Range, Registration,
+    RegistrationParams, SemanticTokens, SemanticTokensLegend,
     SemanticTokensServerCapabilities, ServerCapabilities, ShowMessageParams,
     TextDocumentContentChangeEvent, TextDocumentIdentifier,
     TextDocumentSaveRegistrationOptions, TextDocumentSyncCapability,
@@ -52,7 +52,7 @@ use serde::Serialize;
 use serde_json::Value;
 
 use super::{
-    lsp::{DocumentFilter, LspClient},
+    lsp::{FileFilter, LspClient},
     PluginCatalogRpcHandler,
 };
 
@@ -106,15 +106,13 @@ pub enum PluginServerRpc {
         id: Id,
         method: &'static str,
         params: Params,
-        language_id: Option<String>,
-        path: Option<PathBuf>,
+        file_filters: Vec<FileFilter>,
         rh: ResponseHandler<Value, RpcError>,
     },
     ServerNotification {
         method: &'static str,
         params: Params,
-        language_id: Option<String>,
-        path: Option<PathBuf>,
+        file_filters: Vec<FileFilter>,
     },
     HostRequest {
         id: Id,
@@ -295,16 +293,14 @@ impl PluginServerRpcHandler {
         &self,
         method: &'static str,
         params: P,
-        language_id: Option<String>,
-        path: Option<PathBuf>,
+        file_filters: Vec<FileFilter>,
         check: bool,
     ) -> Result<Value, RpcError> {
         let (tx, rx) = crossbeam_channel::bounded(1);
         self.server_request_common(
             method,
             params,
-            language_id,
-            path,
+            file_filters,
             check,
             ResponseHandler::Chan(tx),
         );
@@ -320,16 +316,14 @@ impl PluginServerRpcHandler {
         &self,
         method: &'static str,
         params: P,
-        language_id: Option<String>,
-        path: Option<PathBuf>,
+        file_filters: Vec<FileFilter>,
         check: bool,
         f: impl RpcCallback<Value, RpcError> + 'static,
     ) {
         self.server_request_common(
             method,
             params,
-            language_id,
-            path,
+            file_filters,
             check,
             ResponseHandler::Callback(Box::new(f)),
         );
@@ -339,8 +333,7 @@ impl PluginServerRpcHandler {
         &self,
         method: &'static str,
         params: P,
-        language_id: Option<String>,
-        path: Option<PathBuf>,
+        file_filters: Vec<FileFilter>,
         check: bool,
         rh: ResponseHandler<Value, RpcError>,
     ) {
@@ -351,8 +344,7 @@ impl PluginServerRpcHandler {
                 id: Id::Num(id as i64),
                 method,
                 params,
-                language_id,
-                path,
+                file_filters,
                 rh,
             });
         } else {
@@ -529,7 +521,7 @@ pub fn handle_plugin_server_message(
 
 struct SaveRegistration {
     include_text: bool,
-    filters: Vec<DocumentFilter>,
+    filters: Vec<FileFilter>,
 }
 
 #[derive(Default)]
@@ -542,7 +534,7 @@ pub struct PluginHostHandler {
     volt_display_name: String,
     pwd: Option<PathBuf>,
     pub(crate) workspace: Option<PathBuf>,
-    document_selector: Vec<DocumentFilter>,
+    pub file_filters: Vec<FileFilter>,
     catalog_rpc: PluginCatalogRpcHandler,
     pub server_rpc: PluginServerRpcHandler,
     pub server_capabilities: ServerCapabilities,
@@ -555,20 +547,16 @@ impl PluginHostHandler {
         pwd: Option<PathBuf>,
         volt_id: VoltID,
         volt_display_name: String,
-        document_selector: DocumentSelector,
+        file_filters: Vec<FileFilter>,
         server_rpc: PluginServerRpcHandler,
         catalog_rpc: PluginCatalogRpcHandler,
     ) -> Self {
-        let document_selector = document_selector
-            .iter()
-            .map(DocumentFilter::from_lsp_filter_loose)
-            .collect();
         Self {
             pwd,
             workspace,
             volt_id,
             volt_display_name,
-            document_selector,
+            file_filters,
             catalog_rpc,
             server_rpc,
             server_capabilities: ServerCapabilities::default(),
@@ -581,26 +569,9 @@ impl PluginHostHandler {
         language_id: Option<&str>,
         path: Option<&Path>,
     ) -> bool {
-        match language_id {
-            Some(language_id) => {
-                for filter in self.document_selector.iter() {
-                    if (filter.language_id.is_none()
-                        || filter.language_id.as_deref() == Some(language_id))
-                        && (path.is_none()
-                            || filter.pattern.is_none()
-                            || filter
-                                .pattern
-                                .as_ref()
-                                .unwrap()
-                                .is_match(path.as_ref().unwrap()))
-                    {
-                        return true;
-                    }
-                }
-                false
-            }
-            None => true,
-        }
+        self.file_filters
+            .iter()
+            .any(|d| d.matches_any(language_id, path))
     }
 
     pub fn method_registered(&mut self, method: &'static str) -> bool {
@@ -746,11 +717,7 @@ impl PluginHostHandler {
 
         if let Some(options) = self.server_registrations.save.as_ref() {
             for filter in options.filters.iter() {
-                if (filter.language_id.is_none()
-                    || filter.language_id.as_deref() == Some(language_id))
-                    && (filter.pattern.is_none()
-                        || filter.pattern.as_ref().unwrap().is_match(path))
-                {
+                if filter.matches_any(Some(language_id), Some(path)) {
                     return (true, options.include_text);
                 }
             }
@@ -780,7 +747,7 @@ impl PluginHostHandler {
                         .document_selector
                         .map(|s| {
                             s.iter()
-                                .map(DocumentFilter::from_lsp_filter_loose)
+                                .flat_map(FileFilter::from_lsp_filter_loose)
                                 .collect()
                         })
                         .unwrap_or_default(),
@@ -854,7 +821,11 @@ impl PluginHostHandler {
                 thread::spawn(move || {
                     let _ = LspClient::start(
                         catalog_rpc,
-                        params.document_selector,
+                        params
+                            .document_selector
+                            .iter()
+                            .flat_map(FileFilter::from_lsp_filter_loose)
+                            .collect(),
                         workspace,
                         volt_id,
                         volt_display_name,

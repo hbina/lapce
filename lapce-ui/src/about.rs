@@ -16,7 +16,8 @@ use lapce_data::{
     data::LapceTabData,
 };
 
-struct AboutUri {}
+struct AboutUri {
+}
 
 impl AboutUri {
     const LAPCE: &str = "https://lapce.dev";

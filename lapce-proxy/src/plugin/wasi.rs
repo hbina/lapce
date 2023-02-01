@@ -22,10 +22,9 @@ use lapce_rpc::{
 };
 use lapce_xi_rope::{Rope, RopeDelta};
 use lsp_types::{
-    notification::Initialized, request::Initialize, DocumentFilter,
-    InitializeParams, InitializeResult, InitializedParams,
-    TextDocumentContentChangeEvent, TextDocumentIdentifier, Url,
-    VersionedTextDocumentIdentifier,
+    notification::Initialized, request::Initialize, InitializeParams,
+    InitializeResult, InitializedParams, TextDocumentContentChangeEvent,
+    TextDocumentIdentifier, Url, VersionedTextDocumentIdentifier,
 };
 use parking_lot::Mutex;
 use psp_types::{Notification, Request};
@@ -41,7 +40,7 @@ use super::{
     },
     volt_icon, PluginCatalogRpcHandler,
 };
-use crate::plugin::psp::PluginServerRpcHandler;
+use crate::plugin::{lsp::FileFilter, psp::PluginServerRpcHandler};
 
 #[derive(Default)]
 pub struct WasiPipe {
@@ -183,9 +182,12 @@ impl PluginServerHandler for Plugin {
 
 impl Plugin {
     fn initialize(&mut self) {
-        let workspace = self.host.workspace.clone();
         let configurations = self.configurations.as_ref().map(unflatten_map);
-        let root_uri = workspace.map(|p| Url::from_directory_path(p).unwrap());
+        let root_uri = self
+            .host
+            .workspace
+            .as_ref()
+            .map(|p| Url::from_directory_path(p).unwrap());
         if let Ok(value) = self.host.server_rpc.server_request(
             Initialize::METHOD,
             #[allow(deprecated)]
@@ -200,9 +202,9 @@ impl Plugin {
                 initialization_options: configurations,
                 workspace_folders: None,
             },
+            self.host.file_filters.iter().map(|d| match d {}),
             None,
-            None,
-            false,
+            true,
         ) {
             let result: InitializeResult = serde_json::from_value(value).unwrap();
             self.host.server_capabilities = result.capabilities;
@@ -476,22 +478,12 @@ pub fn start_volt(
             meta.activation
                 .iter()
                 .flat_map(|m| m.language.iter().flatten())
-                .cloned()
-                .map(|s| DocumentFilter {
-                    language: Some(s),
-                    pattern: None,
-                    scheme: None,
-                })
+                .map(FileFilter::language_from)
                 .chain(
                     meta.activation
                         .iter()
                         .flat_map(|m| m.workspace_contains.iter().flatten())
-                        .cloned()
-                        .map(|s| DocumentFilter {
-                            language: None,
-                            pattern: Some(s),
-                            scheme: None,
-                        }),
+                        .flat_map(FileFilter::pattern_from),
                 )
                 .collect(),
             rpc.clone(),
