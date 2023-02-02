@@ -1,11 +1,13 @@
 use std::{
     collections::HashMap,
+    fmt::Debug,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc,
     },
     thread,
+    time::Duration,
 };
 
 use anyhow::{anyhow, Result};
@@ -291,7 +293,7 @@ impl PluginServerRpcHandler {
     /// do checks like if the server has the capability of the request.
     ///
     /// When check is false, the request will be sent out straight away.
-    pub fn server_request<P: Serialize>(
+    pub fn server_request<P: Serialize + Clone + Debug>(
         &self,
         method: &'static str,
         params: P,
@@ -302,16 +304,16 @@ impl PluginServerRpcHandler {
         let (tx, rx) = crossbeam_channel::bounded(1);
         self.server_request_common(
             method,
-            params,
-            language_id,
-            path,
+            params.clone(),
+            language_id.clone(),
+            path.clone(),
             check,
             ResponseHandler::Chan(tx),
         );
-        rx.recv().unwrap_or_else(|_| {
+        rx.recv_timeout(Duration::from_secs(5)).unwrap_or_else(|e| {
             Err(RpcError {
                 code: 0,
-                message: "io error".to_string(),
+                message: format!("request failed method:{method} params:{params:?} language_id:{language_id:?} path:{path:?}"),
             })
         })
     }

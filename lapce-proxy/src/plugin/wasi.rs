@@ -183,37 +183,33 @@ impl PluginServerHandler for Plugin {
 
 impl Plugin {
     fn initialize(&mut self) {
+        let server_rpc = self.host.server_rpc.clone();
         let workspace = self.host.workspace.clone();
         let configurations = self.configurations.as_ref().map(unflatten_map);
         let root_uri = workspace.map(|p| Url::from_directory_path(p).unwrap());
-        if let Ok(value) = self.host.server_rpc.server_request(
-            Initialize::METHOD,
-            #[allow(deprecated)]
-            InitializeParams {
-                process_id: Some(process::id()),
-                root_path: None,
-                root_uri,
-                capabilities: client_capabilities(),
-                trace: None,
-                client_info: None,
-                locale: None,
-                initialization_options: configurations,
-                workspace_folders: None,
-            },
-            None,
-            None,
-            false,
-        ) {
-            let result: InitializeResult = serde_json::from_value(value).unwrap();
-            self.host.server_capabilities = result.capabilities;
-            self.host.server_rpc.server_notification(
-                Initialized::METHOD,
-                InitializedParams {},
+        thread::spawn(move || {
+            match server_rpc.server_request(
+                Initialize::METHOD,
+                #[allow(deprecated)]
+                InitializeParams {
+                    process_id: Some(process::id()),
+                    root_path: None,
+                    root_uri,
+                    capabilities: client_capabilities(),
+                    trace: None,
+                    client_info: None,
+                    locale: None,
+                    initialization_options: configurations,
+                    workspace_folders: None,
+                },
                 None,
                 None,
                 false,
-            );
-        };
+            ) {
+                Ok(ok) => println!("ok:{:#?}", ok),
+                Err(err) => println!("err:{:#?}", err),
+            }
+        });
     }
 
     fn shutdown(&self) {}
@@ -363,10 +359,6 @@ pub fn start_volt(
     )?;
     let mut linker = wasmtime::Linker::new(&engine);
     wasmtime_wasi::add_to_linker(&mut linker, |s| s)?;
-    HttpState::new()?.add_to_linker(&mut linker, |_| HttpCtx {
-        allowed_hosts: Some(vec!["insecure:allow-all".to_string()]),
-        max_concurrent_requests: Some(100),
-    })?;
 
     let volt_path = meta
         .dir
@@ -400,7 +392,6 @@ pub fn start_volt(
     let stdout = Arc::new(RwLock::new(WasiPipe::new()));
     let stderr = Arc::new(RwLock::new(WasiPipe::new()));
     let wasi = WasiCtxBuilder::new()
-        .inherit_env()?
         .env("VOLT_OS", std::env::consts::OS)?
         .env("VOLT_ARCH", std::env::consts::ARCH)?
         .env("VOLT_LIBC", volt_libc)?
@@ -448,16 +439,40 @@ pub fn start_volt(
             eprintln!("got stderr from plugin: {msg}");
         }
     })?;
-    linker.module(&mut store, "", &module)?;
+    linker.module(&mut store, meta.display_name.as_str(), &module)?;
+
+    let command_start = module.get_export("_start");
+    let reactor_start = module.get_export("_initialize");
+    match (command_start, reactor_start) {
+        (Some(command_start), None) => {
+            if let Some(_) = command_start.func() {
+                println!("command");
+            }
+        }
+        (None, Some(reactor_start)) => {
+            if let Some(_) = reactor_start.func() {
+                println!("reactor");
+            }
+        }
+        (None, None) => {
+            println!("reactor");
+        }
+        (Some(_), Some(_)) => {
+            println!("bad??");
+        }
+    };
+
+    let instance = linker.instantiate(&mut store, &module).unwrap();
+    let handle_rpc = instance
+        .get_typed_func::<(), (), _>(&mut store, "handle_rpc")
+        .unwrap();
+    let initialize = instance
+        .get_typed_func::<(), (), _>(&mut store, "_initialize")
+        .unwrap();
+
     thread::spawn(move || {
-        let instance = linker.instantiate(&mut store, &module).unwrap();
-        let handle_rpc = instance
-            .get_func(&mut store, "handle_rpc")
-            .ok_or_else(|| anyhow!("can't convet to function"))
-            .unwrap()
-            .typed::<(), (), _>(&mut store)
-            .unwrap();
         for msg in io_rx {
+            let _ = initialize.call(&mut store, ());
             if let Ok(msg) = serde_json::to_string(&msg) {
                 let _ = writeln!(stdin.write().unwrap(), "{msg}");
             }

@@ -193,6 +193,7 @@ impl LspClient {
         thread::spawn(move || {
             for msg in io_rx {
                 if let Ok(msg) = serde_json::to_string(&msg) {
+                    println!("<={}", msg);
                     let msg =
                         format!("Content-Length: {}\r\n\r\n{}", msg.len(), msg);
                     let _ = writer.write(msg.as_bytes());
@@ -207,11 +208,11 @@ impl LspClient {
             let mut reader = Box::new(BufReader::new(stdout));
             loop {
                 match read_message(&mut reader) {
-                    Ok(message_str) => {
-                        if let Some(resp) = handle_plugin_server_message(
-                            &local_server_rpc,
-                            &message_str,
-                        ) {
+                    Ok(msg) => {
+                        println!("=>{}", msg);
+                        if let Some(resp) =
+                            handle_plugin_server_message(&local_server_rpc, &msg)
+                        {
                             let _ = io_tx.send(resp);
                         }
                     }
