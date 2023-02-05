@@ -183,9 +183,12 @@ impl PluginServerHandler for Plugin {
 
 impl Plugin {
     fn initialize(&mut self) {
-        let workspace = self.host.workspace.clone();
         let configurations = self.configurations.as_ref().map(unflatten_map);
-        let root_uri = workspace.map(|p| Url::from_directory_path(p).unwrap());
+        let root_uri = self
+            .host
+            .workspace
+            .as_ref()
+            .map(|p| Url::from_directory_path(p).unwrap());
         if let Ok(value) = self.host.server_rpc.server_request(
             Initialize::METHOD,
             #[allow(deprecated)]

@@ -6,6 +6,7 @@ use std::{
         Arc,
     },
     thread,
+    time::Duration,
 };
 
 use anyhow::{anyhow, Result};
@@ -308,7 +309,9 @@ impl PluginServerRpcHandler {
             check,
             ResponseHandler::Chan(tx),
         );
-        rx.recv().unwrap_or_else(|_| {
+        // TODO: add some kind of logging/visual cue for this timeout issues?
+        // TODO: customizable timeout durations
+        rx.recv_timeout(Duration::from_secs(5)).unwrap_or_else(|_| {
             Err(RpcError {
                 code: 0,
                 message: "io error".to_string(),
