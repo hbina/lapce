@@ -678,18 +678,21 @@ impl Widget<LapceTabData> for Plugin {
     }
 }
 
+struct PluginInfoLayouts {
+    name_text_layout: PietTextLayout,
+    desc_text_layout: PietTextLayout,
+    author_text_layout: PietTextLayout,
+    version_text_layout: PietTextLayout,
+    repo_text_layout: PietTextLayout,
+}
+
 pub struct PluginInfo {
     widget_id: WidgetId,
     editor_tab_id: WidgetId,
     volt_id: VoltID,
-
     padding: f64,
     gap: f64,
-    name_text_layout: Option<PietTextLayout>,
-    desc_text_layout: Option<PietTextLayout>,
-    author_text_layout: Option<PietTextLayout>,
-    version_text_layout: Option<PietTextLayout>,
-    repo_text_layout: Option<PietTextLayout>,
+    layouts: Option<PluginInfoLayouts>,
     repo: Option<(Rect, String)>,
     line_height: f64,
     icon_width: f64,
@@ -711,11 +714,7 @@ impl PluginInfo {
             padding: 50.0,
             gap: 30.0,
             line_height: 25.0,
-            name_text_layout: None,
-            desc_text_layout: None,
-            author_text_layout: None,
-            version_text_layout: None,
-            repo_text_layout: None,
+            layouts: None,
             repo: None,
             icon_width: 0.0,
             title_width: 0.0,
@@ -906,80 +905,73 @@ impl Widget<LapceTabData> for PluginInfo {
         let (width, height) = if let Some(volt) =
             data.plugin.volts.volts.get(&self.volt_id)
         {
-            self.name_text_layout = Some(
-                ctx.text()
-                    .new_text_layout(volt.display_name.clone())
-                    .font(
-                        data.config.ui.font_family(),
-                        data.config.ui.font_size() as f64 * 1.5,
-                    )
-                    .default_attribute(TextAttribute::Weight(FontWeight::BOLD))
-                    .text_color(
-                        data.config
-                            .get_color_unchecked(LapceTheme::LAPCE_PLUGIN_NAME)
-                            .clone(),
-                    )
-                    .build()
-                    .unwrap(),
-            );
-            self.desc_text_layout = Some(
-                ctx.text()
-                    .new_text_layout(volt.description.clone())
-                    .font(
-                        data.config.ui.font_family(),
-                        data.config.ui.font_size() as f64,
-                    )
-                    .text_color(
-                        data.config
-                            .get_color_unchecked(
-                                LapceTheme::LAPCE_PLUGIN_DESCRIPTION,
-                            )
-                            .clone(),
-                    )
-                    .build()
-                    .unwrap(),
-            );
-            self.author_text_layout = Some(
-                ctx.text()
-                    .new_text_layout(volt.author.clone())
-                    .font(
-                        data.config.ui.font_family(),
-                        data.config.ui.font_size() as f64,
-                    )
-                    .text_color(
-                        data.config
-                            .get_color_unchecked(LapceTheme::LAPCE_PLUGIN_AUTHOR)
-                            .clone(),
-                    )
-                    .build()
-                    .unwrap(),
-            );
-            self.version_text_layout = Some(
-                ctx.text()
-                    .new_text_layout(format!("v{}", volt.version))
-                    .font(
-                        data.config.ui.font_family(),
-                        data.config.ui.font_size() as f64,
-                    )
-                    .text_color(
-                        data.config
-                            .get_color_unchecked(LapceTheme::EDITOR_FOREGROUND)
-                            .clone(),
-                    )
-                    .build()
-                    .unwrap(),
-            );
+            let name_text_layout = ctx
+                .text()
+                .new_text_layout(volt.display_name.clone())
+                .font(
+                    data.config.ui.font_family(),
+                    data.config.ui.font_size() as f64 * 1.5,
+                )
+                .default_attribute(TextAttribute::Weight(FontWeight::BOLD))
+                .text_color(
+                    data.config
+                        .get_color_unchecked(LapceTheme::LAPCE_PLUGIN_NAME)
+                        .clone(),
+                )
+                .build()
+                .unwrap();
 
-            self.icon_width = self.name_text_layout.as_ref().unwrap().size().height
-                * 2.0
-                + self.line_height * 4.0;
-            self.title_width = self
-                .name_text_layout
-                .as_ref()
-                .unwrap()
+            let desc_text_layout = ctx
+                .text()
+                .new_text_layout(volt.description.clone())
+                .font(
+                    data.config.ui.font_family(),
+                    data.config.ui.font_size() as f64,
+                )
+                .text_color(
+                    data.config
+                        .get_color_unchecked(LapceTheme::LAPCE_PLUGIN_DESCRIPTION)
+                        .clone(),
+                )
+                .build()
+                .unwrap();
+
+            let author_text_layout = ctx
+                .text()
+                .new_text_layout(volt.author.clone())
+                .font(
+                    data.config.ui.font_family(),
+                    data.config.ui.font_size() as f64,
+                )
+                .text_color(
+                    data.config
+                        .get_color_unchecked(LapceTheme::LAPCE_PLUGIN_AUTHOR)
+                        .clone(),
+                )
+                .build()
+                .unwrap();
+
+            let version_text_layout = ctx
+                .text()
+                .new_text_layout(format!("v{}", volt.version))
+                .font(
+                    data.config.ui.font_family(),
+                    data.config.ui.font_size() as f64,
+                )
+                .text_color(
+                    data.config
+                        .get_color_unchecked(LapceTheme::EDITOR_FOREGROUND)
+                        .clone(),
+                )
+                .build()
+                .unwrap();
+
+            self.icon_width =
+                name_text_layout.size().height * 2.0 + self.line_height * 4.0;
+            self.title_width = name_text_layout
                 .size()
                 .width
-                .max(self.desc_text_layout.as_ref().unwrap().size().width);
+                .max(desc_text_layout.size().width);
 
             let font = FontDescriptor::new(data.config.ui.font_family())
                 .with_size(data.config.ui.font_size() as f64);
@@ -1010,7 +1002,7 @@ impl Widget<LapceTabData> for PluginInfo {
 
             height += self.gap;
 
-            self.repo_text_layout = {
+            let repo_text_layout = {
                 let text = format!(
                     "Repository: {}",
                     volt.repository.as_deref().unwrap_or("")
@@ -1043,8 +1035,7 @@ impl Widget<LapceTabData> for PluginInfo {
                     let shift = layout.hit_test_text_position(12).point.x;
                     let x = padding + self.padding + self.icon_width + shift;
                     let y = self.gap
-                        + self.name_text_layout.as_ref().unwrap().size().height
-                            * 2.0
+                        + name_text_layout.size().height * 2.0
                         + self.line_height;
                     let rect =
                         Size::new(layout.size().width - shift, self.line_height)
@@ -1053,8 +1044,16 @@ impl Widget<LapceTabData> for PluginInfo {
                     self.repo = Some((rect, repo.to_string()));
                 }
 
-                Some(layout)
+                layout
             };
+
+            self.layouts = Some(PluginInfoLayouts {
+                name_text_layout,
+                desc_text_layout,
+                author_text_layout,
+                version_text_layout,
+                repo_text_layout,
+            });
 
             (info_width, height)
         } else {
@@ -1065,7 +1064,14 @@ impl Widget<LapceTabData> for PluginInfo {
     }
 
     fn paint(&mut self, ctx: &mut PaintCtx, data: &LapceTabData, _env: &Env) {
-        if let Some(name_text_layout) = self.name_text_layout.as_ref() {
+        if let Some(PluginInfoLayouts {
+            name_text_layout,
+            desc_text_layout,
+            author_text_layout,
+            version_text_layout,
+            repo_text_layout,
+        }) = self.layouts.as_ref()
+        {
             let padding = self.get_margin(ctx.size().width);
 
             let mut y = self.gap;
@@ -1073,19 +1079,15 @@ impl Widget<LapceTabData> for PluginInfo {
             let name_y = y;
             y += size.height * 2.0;
 
-            let desc_text_layout = self.desc_text_layout.as_ref().unwrap();
             let desc_y = y;
             y += self.line_height;
 
-            let repo_text_layout = self.repo_text_layout.as_ref().unwrap();
             let repo_y = y;
             y += self.line_height;
 
-            let author_text_layout = self.author_text_layout.as_ref().unwrap();
             let author_y = y;
             y += self.line_height;
 
-            let version_text_layout = self.version_text_layout.as_ref().unwrap();
             let button_y = y;
 
             let icon_rect = Rect::ZERO
@@ -1159,7 +1161,7 @@ impl Widget<LapceTabData> for PluginInfo {
             let text = if status == PluginStatus::Install {
                 status.to_string()
             } else {
-                format!("{status} ▼")
+                format!("hello {status} ▼")
             };
             let button_text_layout = ctx
                 .text()
