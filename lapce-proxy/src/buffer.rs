@@ -27,19 +27,20 @@ pub struct Buffer {
 }
 
 impl Buffer {
-    pub fn new(id: BufferId, path: PathBuf) -> Buffer {
+    pub fn new(id: BufferId, path: PathBuf) -> Result<Buffer, std::io::Error> {
+        let path = path.canonicalize()?;
         let rope = Rope::from(load_file(&path).unwrap_or_default());
         let rev = u64::from(!rope.is_empty());
         let language_id = language_id_from_path(&path).unwrap_or("");
         let mod_time = get_mod_time(&path);
-        Buffer {
+        Ok(Buffer {
             id,
             rope,
             path,
             language_id,
             rev,
             mod_time,
-        }
+        })
     }
 
     pub fn save(&mut self, rev: u64) -> Result<()> {

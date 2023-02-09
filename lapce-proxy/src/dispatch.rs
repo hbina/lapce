@@ -269,20 +269,34 @@ impl ProxyHandler for Dispatcher {
         use ProxyRequest::*;
         match rpc {
             NewBuffer { buffer_id, path } => {
-                let buffer = Buffer::new(buffer_id, path.clone());
-                let content = buffer.rope.to_string();
-                self.catalog_rpc.did_open_document(
-                    &path,
-                    buffer.language_id.to_string(),
-                    buffer.rev as i32,
-                    content.clone(),
-                );
-                self.file_watcher.watch(&path, false, OPEN_FILE_EVENT_TOKEN);
-                self.buffers.insert(path, buffer);
-                self.respond_rpc(
-                    id,
-                    Ok(ProxyResponse::NewBufferResponse { content }),
-                );
+                match Buffer::new(buffer_id, path.clone()) {
+                    Ok(buffer) => {
+                        let content = buffer.rope.to_string();
+                        self.catalog_rpc.did_open_document(
+                            &path,
+                            buffer.language_id.to_string(),
+                            buffer.rev as i32,
+                            content.clone(),
+                        );
+                        self.file_watcher.watch(&path, false, OPEN_FILE_EVENT_TOKEN);
+                        self.buffers.insert(path, buffer);
+                        self.respond_rpc(
+                            id,
+                            Ok(ProxyResponse::NewBufferResponse { content }),
+                        );
+                    }
+                    Err(err) => {
+                        self.respond_rpc(
+                            id,
+                            Err(RpcError {
+                                code: 0,
+                                message: format!(
+                                    "Unable to create buffer because '{err}'"
+                                ),
+                            }),
+                        );
+                    }
+                }
             }
             BufferHead { path } => {
                 let result = if let Some(workspace) = self.workspace.as_ref() {
@@ -690,20 +704,32 @@ impl ProxyHandler for Dispatcher {
                 path,
                 rev,
                 content,
-            } => {
-                let mut buffer = Buffer::new(buffer_id, path.clone());
-                buffer.rope = Rope::from(content);
-                buffer.rev = rev;
-                let result = buffer
-                    .save(rev)
-                    .map(|_| ProxyResponse::Success {})
-                    .map_err(|e| RpcError {
-                        code: 0,
-                        message: e.to_string(),
-                    });
-                self.buffers.insert(path, buffer);
-                self.respond_rpc(id, result);
-            }
+            } => match Buffer::new(buffer_id, path.clone()) {
+                Ok(mut buffer) => {
+                    buffer.rope = Rope::from(content);
+                    buffer.rev = rev;
+                    let result = buffer
+                        .save(rev)
+                        .map(|_| ProxyResponse::Success {})
+                        .map_err(|e| RpcError {
+                            code: 0,
+                            message: e.to_string(),
+                        });
+                    self.buffers.insert(path, buffer);
+                    self.respond_rpc(id, result);
+                }
+                Err(err) => {
+                    self.respond_rpc(
+                        id,
+                        Err(RpcError {
+                            code: 0,
+                            message: format!(
+                                "Unable to create buffer because '{err}'"
+                            ),
+                        }),
+                    );
+                }
+            },
             CreateFile { path } => {
                 let result = path
                     .parent()
