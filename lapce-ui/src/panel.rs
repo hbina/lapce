@@ -341,10 +341,10 @@ impl Widget<LapceTabData> for PanelSection {
             let icon_rect = Size::ZERO
                 .to_rect()
                 .with_origin(Point::new(
-                    header_rect.width() - HEADER_HEIGHT / 2.0,
-                    HEADER_HEIGHT / 2.0,
+                    header_rect.width() - HEADER_HEIGHT * 0.5,
+                    HEADER_HEIGHT * 0.5,
                 ))
-                .inflate(icon_size as f64 / 2.0, icon_size as f64 / 2.0);
+                .inflate(icon_size as f64 * 0.5, icon_size as f64 * 0.5);
             ctx.draw_svg(
                 &data.config.ui_svg(icon_name),
                 icon_rect,
@@ -972,7 +972,7 @@ impl Widget<LapceTabData> for PanelContainer {
                 )
                 .build()
                 .unwrap();
-            let x = (rect.width() - text_layout.size().width) / 2.0;
+            let x = (rect.width() - text_layout.size().width) * 0.5;
             ctx.draw_text(
                 &text_layout,
                 Point::new(x, text_layout.y_offset(rect.height())),
@@ -1004,12 +1004,6 @@ impl PanelSwitcher {
         }
     }
 
-    fn icon_padding(data: &LapceTabData) -> f64 {
-        ((data.config.ui.header_height() - data.config.ui.font_size()) as f64 * 0.5
-            / 2.0)
-            .round()
-    }
-
     fn update_icons(&mut self, self_size: Size, data: &LapceTabData) {
         let mut icons = Vec::new();
         if let Some(order) = data.panel.order.get(&self.position) {
@@ -1017,34 +1011,33 @@ impl PanelSwitcher {
                 icons.push(Self::panel_icon(kind, data));
             }
         }
-        let switcher_size = data.config.ui.header_height() as f64;
-        let icon_size = data.config.ui.font_size() as f64;
         self.maximise_toggle = None;
+        let icon_size = data.config.ui.header_height() as f64;
         if self.position.is_bottom() {
             for (i, (_, icon)) in icons.iter_mut().enumerate() {
                 icon.rect = Rect::ZERO
                     .with_origin(Point::new(
-                        self_size.width / 2.0,
-                        (i as f64 + 0.5) * switcher_size,
+                        icon_size * 0.5,
+                        (i as f64 + 0.5) * icon_size,
                     ))
-                    .inflate(icon_size / 2.0, icon_size / 2.0);
+                    .inflate(icon_size * 0.5, icon_size * 0.5);
             }
             self.maximise_toggle = Some(
                 Rect::ZERO
                     .with_origin(Point::new(
-                        self_size.width / 2.0,
-                        self_size.height - switcher_size / 2.0,
+                        self_size.width * 0.5,
+                        self_size.height - icon_size * 0.5,
                     ))
-                    .inflate(icon_size / 2.0, icon_size / 2.0),
+                    .inflate(icon_size * 0.5, icon_size * 0.5),
             );
         } else {
             for (i, (_, icon)) in icons.iter_mut().enumerate() {
                 icon.rect = Rect::ZERO
                     .with_origin(Point::new(
-                        (i as f64 + 0.5) * switcher_size,
-                        self_size.height / 2.0,
+                        (i as f64 + 0.5) * icon_size,
+                        icon_size * 0.5,
                     ))
-                    .inflate(icon_size / 2.0, icon_size / 2.0);
+                    .inflate(icon_size * 0.5, icon_size * 0.5);
             }
         }
         self.icons = icons;
@@ -1105,10 +1098,8 @@ impl Widget<LapceTabData> for PanelSwitcher {
                     }
                 }
                 self.mouse_pos = mouse_event.pos;
-                let icon_padding = Self::icon_padding(data);
                 for (_, icon) in self.icons.iter() {
-                    let rect = icon.rect.inflate(icon_padding, icon_padding);
-                    if rect.contains(self.mouse_pos) {
+                    if icon.rect.contains(self.mouse_pos) {
                         if !self.on_icon {
                             ctx.set_cursor(&Cursor::Pointer);
                             self.on_icon = true;
@@ -1119,10 +1110,7 @@ impl Widget<LapceTabData> for PanelSwitcher {
                 }
                 if self
                     .maximise_toggle
-                    .map(|r| {
-                        r.inflate(icon_padding, icon_padding)
-                            .contains(mouse_event.pos)
-                    })
+                    .map(|r| r.contains(mouse_event.pos))
                     .unwrap_or(false)
                 {
                     if !self.on_icon {
@@ -1139,10 +1127,8 @@ impl Widget<LapceTabData> for PanelSwitcher {
                 }
             }
             Event::MouseDown(mouse_event) => {
-                let icon_padding = Self::icon_padding(data);
                 for (i, (_, icon)) in self.icons.iter().enumerate() {
-                    let rect = icon.rect.inflate(icon_padding, icon_padding);
-                    if rect.contains(mouse_event.pos) {
+                    if icon.rect.contains(mouse_event.pos) {
                         self.clicked_icon = Some(i);
                         ctx.set_active(true);
                         break;
@@ -1151,10 +1137,7 @@ impl Widget<LapceTabData> for PanelSwitcher {
                 self.clicked_maximise = false;
                 if self
                     .maximise_toggle
-                    .map(|r| {
-                        r.inflate(icon_padding, icon_padding)
-                            .contains(mouse_event.pos)
-                    })
+                    .map(|r| r.contains(mouse_event.pos))
                     .unwrap_or(false)
                 {
                     self.clicked_maximise = true;
@@ -1162,10 +1145,8 @@ impl Widget<LapceTabData> for PanelSwitcher {
             }
             Event::MouseUp(mouse_event) => {
                 ctx.set_active(false);
-                let icon_padding = Self::icon_padding(data);
                 for (i, (_, icon)) in self.icons.iter().enumerate() {
-                    let rect = icon.rect.inflate(icon_padding, icon_padding);
-                    if rect.contains(mouse_event.pos) {
+                    if icon.rect.contains(mouse_event.pos) {
                         if self.clicked_icon == Some(i) {
                             ctx.submit_command(icon.command.clone());
                         }
@@ -1175,10 +1156,7 @@ impl Widget<LapceTabData> for PanelSwitcher {
                 if self.clicked_maximise
                     && self
                         .maximise_toggle
-                        .map(|r| {
-                            r.inflate(icon_padding, icon_padding)
-                                .contains(mouse_event.pos)
-                        })
+                        .map(|r| r.contains(mouse_event.pos))
                         .unwrap_or(false)
                 {
                     ctx.submit_command(Command::new(
@@ -1245,6 +1223,7 @@ impl Widget<LapceTabData> for PanelSwitcher {
         }
 
         let rect = ctx.size().to_rect();
+        let icon_size = data.config.ui.header_height() as f64;
         ctx.fill(
             rect,
             data.config
@@ -1350,7 +1329,6 @@ impl Widget<LapceTabData> for PanelSwitcher {
             }
         }
 
-        let icon_padding = Self::icon_padding(data);
         let is_bottom = self.position.is_bottom();
         let mut active_kinds = Vec::new();
         if let Some((panel, shown)) =
@@ -1361,10 +1339,9 @@ impl Widget<LapceTabData> for PanelSwitcher {
             }
         }
         for (kind, icon) in self.icons.iter() {
-            let mouse_rect = icon.rect.inflate(icon_padding, icon_padding);
-            if mouse_rect.contains(self.mouse_pos) {
+            if icon.rect.contains(self.mouse_pos) {
                 ctx.fill(
-                    mouse_rect,
+                    icon.rect,
                     &data.config.get_hover_color(if is_bottom {
                         data.config
                             .get_color_unchecked(LapceTheme::EDITOR_BACKGROUND)
@@ -1379,8 +1356,8 @@ impl Widget<LapceTabData> for PanelSwitcher {
                     PanelPosition::LeftTop | PanelPosition::RightTop => {
                         ctx.stroke(
                             Line::new(
-                                Point::new(mouse_rect.x0, mouse_rect.y1 + 1.0),
-                                Point::new(mouse_rect.x1, mouse_rect.y1 + 1.0),
+                                Point::new(icon.rect.x0, icon.rect.y1 + 1.0),
+                                Point::new(icon.rect.x1, icon.rect.y1 + 1.0),
                             ),
                             data.config
                                 .get_color_unchecked(LapceTheme::EDITOR_CARET),
@@ -1390,8 +1367,8 @@ impl Widget<LapceTabData> for PanelSwitcher {
                     PanelPosition::LeftBottom | PanelPosition::RightBottom => {
                         ctx.stroke(
                             Line::new(
-                                Point::new(mouse_rect.x0, mouse_rect.y0 - 1.0),
-                                Point::new(mouse_rect.x1, mouse_rect.y0 - 1.0),
+                                Point::new(icon.rect.x0, icon.rect.y0 - 1.0),
+                                Point::new(icon.rect.x1, icon.rect.y0 - 1.0),
                             ),
                             data.config
                                 .get_color_unchecked(LapceTheme::EDITOR_CARET),
@@ -1401,8 +1378,8 @@ impl Widget<LapceTabData> for PanelSwitcher {
                     PanelPosition::BottomLeft => {
                         ctx.stroke(
                             Line::new(
-                                Point::new(mouse_rect.x0 - 1.0, mouse_rect.y0),
-                                Point::new(mouse_rect.x0 - 1.0, mouse_rect.y1),
+                                Point::new(icon.rect.x1 - 1.0, icon.rect.y0),
+                                Point::new(icon.rect.x1 - 1.0, icon.rect.y1),
                             ),
                             data.config
                                 .get_color_unchecked(LapceTheme::EDITOR_CARET),
@@ -1412,8 +1389,8 @@ impl Widget<LapceTabData> for PanelSwitcher {
                     PanelPosition::BottomRight => {
                         ctx.stroke(
                             Line::new(
-                                Point::new(mouse_rect.x1 + 1.0, mouse_rect.y0),
-                                Point::new(mouse_rect.x1 + 1.0, mouse_rect.y1),
+                                Point::new(icon.rect.x0 + 1.0, icon.rect.y0),
+                                Point::new(icon.rect.x0 + 1.0, icon.rect.y1),
                             ),
                             data.config
                                 .get_color_unchecked(LapceTheme::EDITOR_CARET),
@@ -1425,7 +1402,7 @@ impl Widget<LapceTabData> for PanelSwitcher {
             let svg = data.config.ui_svg(icon.icon);
             ctx.draw_svg(
                 &svg,
-                icon.rect,
+                icon.rect.inflate(-(icon_size * 0.2), -(icon_size * 0.2)),
                 Some(
                     data.config
                         .get_color_unchecked(LapceTheme::LAPCE_ICON_ACTIVE),
@@ -1433,7 +1410,7 @@ impl Widget<LapceTabData> for PanelSwitcher {
             );
         }
 
-        if let Some(rect) = self.maximise_toggle {
+        if let Some(maximise_rect) = self.maximise_toggle {
             let maximized = data
                 .panel
                 .style
@@ -1446,10 +1423,9 @@ impl Widget<LapceTabData> for PanelSwitcher {
                     .get(&PanelPosition::BottomRight)
                     .map(|s| s.maximized)
                     .unwrap_or(false);
-            let mouse_rect = rect.inflate(icon_padding, icon_padding);
-            if mouse_rect.contains(self.mouse_pos) {
+            if maximise_rect.contains(self.mouse_pos) {
                 ctx.fill(
-                    mouse_rect,
+                    maximise_rect,
                     &data.config.get_hover_color(if is_bottom {
                         data.config
                             .get_color_unchecked(LapceTheme::EDITOR_BACKGROUND)
@@ -1466,7 +1442,7 @@ impl Widget<LapceTabData> for PanelSwitcher {
             };
             ctx.draw_svg(
                 &svg,
-                rect,
+                maximise_rect.inflate(-(icon_size * 0.2), -(icon_size * 0.2)),
                 Some(
                     data.config
                         .get_color_unchecked(LapceTheme::LAPCE_ICON_ACTIVE),
