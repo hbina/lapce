@@ -6,6 +6,7 @@ use std::{
     sync::Arc,
 };
 
+use crossbeam_channel::{unbounded, Sender};
 use druid::{
     piet::{
         PietText, PietTextLayout, Text, TextAttribute, TextLayout, TextLayoutBuilder,
@@ -40,7 +41,8 @@ use lapce_rpc::{
 use lapce_xi_rope::{
     find::CaseMatching,
     spans::{Spans, SpansBuilder},
-    Interval, Rope, RopeDelta, Transformer,
+    tree::Node,
+    Interval, Rope, RopeDelta, RopeInfo, Transformer,
 };
 use lsp_types::{
     CodeActionOrCommand, CodeActionResponse, DiagnosticSeverity, InlayHint,
@@ -376,6 +378,11 @@ impl PhantomTextLine {
     }
 }
 
+pub enum DocumentSyntaxEdits {
+    NewSyntax(Option<Syntax>),
+    Edits((u64, Node<RopeInfo>, Option<SmallVec<[SyntaxEdit; 3]>>)),
+}
+
 /// A [`Document`] is a core structure for files in the editor. All editors are merely views into a
 /// specific document, which is what allows views to be synchronized without any effort.  
 /// This builds on top of the held [`Buffer`], providing syntax/semantic highlighting, phantom
@@ -393,7 +400,8 @@ pub struct Document {
     /// the palette's input buffer.
     content: BufferContent,
     /// Tree-sitter syntax highlighting information.
-    syntax: Option<Syntax>,
+    syntax: Arc<Option<Syntax>>,
+    syntax_edits_rx: Sender<DocumentSyntaxEdits>,
     line_styles: Rc<RefCell<LineStyles>>,
     /// Semantic highlighting information (which is provided by the LSP)
     semantic_styles: Option<Arc<Spans<Style>>>,
@@ -451,14 +459,14 @@ impl Document {
     ) -> Self {
         // Only files have syntax highlighing automatically,
         // though scratch buffer can have it be set manually by the user.
-        let syntax = match &content {
+        let syntax = Arc::new(match &content {
             BufferContent::File(path) => {
                 Self::syntax_to_option(&proxy, Syntax::init(path))
             }
             BufferContent::Local(_) => None,
             BufferContent::SettingsValue(..) => None,
             BufferContent::Scratch(..) => None,
-        };
+        });
         // Since scratch specifies its own id, we have to use that as our buffer id.
         let id = match &content {
             BufferContent::Scratch(id, _) => *id,
@@ -466,12 +474,33 @@ impl Document {
         };
         let mut selection_find = Find::new(0);
         selection_find.case_matching = CaseMatching::Exact;
+
+        let (tx, rx) = unbounded::<DocumentSyntaxEdits>();
+
+        let syntax_edits_rx = tx.clone();
+        let mut syntax_ref = syntax.clone();
+        std::thread::spawn(move || loop {
+            for change in &rx {
+                match change {
+                    DocumentSyntaxEdits::NewSyntax(syntax) => {
+                        *Arc::make_mut(&mut syntax_ref) = syntax;
+                    }
+                    DocumentSyntaxEdits::Edits((rev, text, edits)) => {
+                        if let Some(syntax) = Arc::make_mut(&mut syntax_ref) {
+                            syntax.parse(rev, text, edits.as_deref());
+                        }
+                    }
+                };
+            }
+        });
+
         Self {
             id,
             tab_id,
             buffer: Buffer::new(""),
             content,
             syntax,
+            syntax_edits_rx,
             line_styles: Rc::new(RefCell::new(HashMap::new())),
             text_layouts: Rc::new(RefCell::new(TextLayoutCache::new())),
             sticky_headers: Rc::new(RefCell::new(HashMap::new())),
@@ -532,14 +561,16 @@ impl Document {
 
     pub fn set_content(&mut self, content: BufferContent) {
         self.content = content;
-        self.syntax = match &self.content {
-            BufferContent::File(path) => {
-                Self::syntax_to_option(&self.proxy, Syntax::init(path))
-            }
-            BufferContent::Local(_) => None,
-            BufferContent::SettingsValue(..) => None,
-            BufferContent::Scratch(..) => None,
-        };
+        self.syntax_edits_rx
+            .send(DocumentSyntaxEdits::NewSyntax(match &self.content {
+                BufferContent::File(path) => {
+                    Self::syntax_to_option(&self.proxy, Syntax::init(path))
+                }
+                BufferContent::Local(_) => None,
+                BufferContent::SettingsValue(..) => None,
+                BufferContent::Scratch(..) => None,
+            }))
+            .unwrap();
         self.on_update(None);
     }
 
@@ -555,15 +586,19 @@ impl Document {
     //// Initialize the content with some text, this marks the document as loaded.
     pub fn init_content(&mut self, content: Rope) {
         self.buffer.init_content(content);
-        self.buffer.detect_indent(self.syntax.as_ref());
+        self.buffer.detect_indent(self.syntax.as_ref().as_ref());
         self.loaded = true;
         self.on_update(None);
     }
 
     /// Set the syntax highlighting this document should use.
     pub fn set_language(&mut self, language: LapceLanguage) {
-        self.syntax =
-            Self::syntax_to_option(&self.proxy, Syntax::from_language(language));
+        self.syntax_edits_rx
+            .send(DocumentSyntaxEdits::NewSyntax(Self::syntax_to_option(
+                &self.proxy,
+                Syntax::from_language(language),
+            )))
+            .unwrap();
     }
 
     pub fn set_diagnostics(&mut self, diagnostics: &[EditorDiagnostic]) {
@@ -1064,7 +1099,9 @@ impl Document {
     }
 
     pub fn set_syntax(&mut self, syntax: Option<Syntax>) {
-        self.syntax = syntax;
+        self.syntax_edits_rx
+            .send(DocumentSyntaxEdits::NewSyntax(syntax))
+            .unwrap();
         if self.semantic_styles.is_none() {
             self.clear_style_cache();
         }
@@ -1097,12 +1134,12 @@ impl Document {
         &mut self,
         edits: Option<SmallVec<[SyntaxEdit; 3]>>,
     ) {
-        let Some(syntax)  = self.syntax.as_mut() else { return };
-
         let rev = self.buffer.rev();
         let text = self.buffer.text().clone();
 
-        syntax.parse(rev, text, edits.as_deref());
+        self.syntax_edits_rx
+            .send(DocumentSyntaxEdits::Edits((rev, text, edits)))
+            .unwrap();
     }
 
     /// Update the inlay hints with new ones
@@ -1121,7 +1158,7 @@ impl Document {
     }
 
     pub fn syntax(&self) -> Option<&Syntax> {
-        self.syntax.as_ref()
+        self.syntax.as_ref().as_ref()
     }
 
     /// Update the styles after an edit, so the highlights are at the correct positions.  
@@ -1130,13 +1167,13 @@ impl Document {
         if let Some(styles) = self.semantic_styles.as_mut() {
             Arc::make_mut(styles).apply_shape(delta);
         }
-        if let Some(syntax) = self.syntax.as_mut() {
+        if let Some(syntax) = Arc::make_mut(&mut self.syntax) {
             if let Some(styles) = syntax.styles.as_mut() {
                 Arc::make_mut(styles).apply_shape(delta);
             }
         }
 
-        if let Some(syntax) = self.syntax.as_mut() {
+        if let Some(syntax) = Arc::make_mut(&mut self.syntax) {
             syntax.lens.apply_delta(delta);
         }
     }
@@ -1391,7 +1428,7 @@ impl Document {
             cursor,
             &mut self.buffer,
             s,
-            self.syntax.as_ref(),
+            self.syntax.as_ref().as_ref(),
             auto_closing,
         );
         // Keep track of the change in the cursor mode for undo/redo
@@ -1424,7 +1461,7 @@ impl Document {
             cursor,
             &mut self.buffer,
             cmd,
-            self.syntax.as_ref(),
+            self.syntax.as_ref().as_ref(),
             &mut clipboard,
             modal,
             register,
@@ -2298,6 +2335,7 @@ impl Document {
             if let Some(offset) = self
                 .syntax
                 .as_ref()
+                .as_ref()
                 .and_then(|syntax| syntax.parent_offset(offset))
             {
                 self.buffer.line_of_offset(offset)
@@ -3160,21 +3198,26 @@ impl Document {
             return lines.clone();
         }
         let offset = self.buffer.offset_of_line(line + 1);
-        let lines = self.syntax.as_ref()?.sticky_headers(offset).map(|offsets| {
-            offsets
-                .iter()
-                .filter_map(|offset| {
-                    let l = self.buffer.line_of_offset(*offset);
-                    if l <= line {
-                        Some(l)
-                    } else {
-                        None
-                    }
-                })
-                .dedup()
-                .sorted()
-                .collect()
-        });
+        let lines =
+            self.syntax
+                .as_ref()
+                .as_ref()?
+                .sticky_headers(offset)
+                .map(|offsets| {
+                    offsets
+                        .iter()
+                        .filter_map(|offset| {
+                            let l = self.buffer.line_of_offset(*offset);
+                            if l <= line {
+                                Some(l)
+                            } else {
+                                None
+                            }
+                        })
+                        .dedup()
+                        .sorted()
+                        .collect()
+                });
         self.sticky_headers.borrow_mut().insert(line, lines.clone());
         lines
     }
