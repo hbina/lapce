@@ -203,21 +203,3 @@ pub fn restart(path: &Path) -> Result<()> {
         .spawn()?;
     Ok(())
 }
-
-#[cfg(all(target_os = "windows", feature = "portable"))]
-pub fn cleanup() {
-    // Clean up backup exe after an update
-    if let Ok(process_path) = std::env::current_exe() {
-        if let Some(dst_parent) = process_path.parent() {
-            let _ = std::fs::remove_file(dst_parent.join("lapce.exe.bak"));
-        }
-    }
-}
-
-#[cfg(any(
-    not(target_os = "windows"),
-    all(target_os = "windows", not(feature = "portable"))
-))]
-pub fn cleanup() {
-    // Nothing to do yet
-}

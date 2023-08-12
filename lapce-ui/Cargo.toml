@@ -6,6 +6,7 @@ edition.workspace = true
 
 [dependencies]
 alacritty_terminal.workspace = true
+crossbeam-channel.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true
@@ -45,7 +46,7 @@ open = "3.0.2" # bump when other deps using windows{,-sys} are bump'd
 winres = "0.1.12"
 
 [features]
-default = ["all-languages", "lapce-data/updater"]
+default = ["all-languages"]
 portable = ["lapce-data/portable"]
 
 # To build lapce with only some of the supported languages, for example:

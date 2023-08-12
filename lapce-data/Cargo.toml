@@ -63,5 +63,4 @@ dmg = "0.1.1"
 zip = { version = "0.6.3", default-features = false, features = ["deflate"] }
 
 [features]
-updater = []
 portable = []

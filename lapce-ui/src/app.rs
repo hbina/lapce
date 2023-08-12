@@ -34,12 +34,6 @@ use crate::{
 #[clap(version=*meta::VERSION)]
 #[derive(Debug)]
 struct Cli {
-    /// Launch new window even if Lapce is already running
-    #[clap(short, long, action)]
-    new: bool,
-    /// Don't return instantly when opened in terminal
-    #[clap(short, long, action)]
-    wait: bool,
     paths: Vec<PathBuf>,
 }
 
@@ -55,36 +49,12 @@ pub fn launch() {
     }
 
     let cli = Cli::parse();
-
-    // small hack to unblock terminal if launched from it
-    if !cli.wait {
-        let mut args = std::env::args().collect::<Vec<_>>();
-        args.push("--wait".to_string());
-        let mut cmd = std::process::Command::new(&args[0]);
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
-        if let Err(why) = cmd
-            .args(&args[1..])
-            .stderr(Stdio::null())
-            .stdout(Stdio::null())
-            .spawn()
-        {
-            eprintln!("Failed to launch lapce: {why}");
-        };
-        return;
-    }
     let pwd = std::env::current_dir().unwrap_or_default();
     let paths: Vec<PathBuf> = cli
         .paths
         .iter()
         .map(|p| pwd.join(p).canonicalize().unwrap_or_default())
         .collect();
-    if !cli.new && LapceData::try_open_in_existing_process(&paths).is_ok() {
-        return;
-    }
-
-    #[cfg(feature = "updater")]
-    lapce_data::update::cleanup();
 
     let mut log_dispatch = fern::Dispatch::new()
         .format(|out, message, record| {

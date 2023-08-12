@@ -121,8 +121,6 @@ impl LapceData {
         paths: Vec<PathBuf>,
         log_file: Option<PathBuf>,
     ) -> Self {
-        let _ = lapce_proxy::register_lapce_path();
-
         let log_file = Arc::new(log_file);
         let db = Arc::new(LapceDb::new().unwrap());
         let mut windows = im::HashMap::new();
@@ -238,25 +236,6 @@ impl LapceData {
             }
         }
 
-        #[cfg(feature = "updater")]
-        {
-            let local_event_sink = event_sink.clone();
-            std::thread::spawn(move || loop {
-                if let Ok(release) = crate::update::get_latest_release() {
-                    let _ = local_event_sink.submit_command(
-                        LAPCE_UI_COMMAND,
-                        LapceUICommand::UpdateLatestRelease(release),
-                        Target::Global,
-                    );
-                }
-                std::thread::sleep(std::time::Duration::from_secs(60 * 60));
-            });
-        }
-
-        std::thread::spawn(move || {
-            let _ = Self::listen_local_socket(event_sink);
-        });
-
         Self {
             active_window: Arc::new(
                 windows
@@ -304,89 +283,6 @@ impl LapceData {
         env.set(LapceTheme::INPUT_LINE_HEIGHT, 20.0);
         env.set(LapceTheme::INPUT_LINE_PADDING, 5.0);
         env.set(LapceTheme::INPUT_FONT_SIZE, 13u64);
-    }
-
-    fn listen_local_socket(event_sink: ExtEventSink) -> Result<()> {
-        let local_socket = Directory::local_socket()
-            .ok_or_else(|| anyhow!("can't get local socket folder"))?;
-        let _ = std::fs::remove_file(&local_socket);
-        let socket =
-            interprocess::local_socket::LocalSocketListener::bind(local_socket)?;
-
-        for stream in socket.incoming().flatten() {
-            let event_sink = event_sink.clone();
-            thread::spawn(move || -> Result<()> {
-                let mut reader = BufReader::new(stream);
-                loop {
-                    let msg: CoreMessage = lapce_rpc::stdio::read_msg(&mut reader)?;
-
-                    if let RpcMessage::Notification(CoreNotification::OpenPaths {
-                        window_tab_id,
-                        folders,
-                        files,
-                    }) = msg
-                    {
-                        let window_tab_id =
-                            window_tab_id.map(|(window_id, tab_id)| {
-                                (
-                                    WindowId::from_usize(window_id),
-                                    WidgetId::from_usize(tab_id),
-                                )
-                            });
-                        let _ = event_sink.submit_command(
-                            LAPCE_UI_COMMAND,
-                            LapceUICommand::OpenPaths {
-                                window_tab_id,
-                                folders,
-                                files,
-                            },
-                            Target::Global,
-                        );
-                    } else {
-                        log::trace!("Unhandled message: {msg:?}");
-                    }
-
-                    let stream_ref = reader.get_mut();
-                    let _ = stream_ref.write_all(b"received");
-                    let _ = stream_ref.flush();
-                }
-            });
-        }
-        Ok(())
-    }
-
-    pub fn try_open_in_existing_process(paths: &[PathBuf]) -> Result<()> {
-        let local_socket = Directory::local_socket()
-            .ok_or_else(|| anyhow!("can't get local socket folder"))?;
-        let mut socket =
-            interprocess::local_socket::LocalSocketStream::connect(local_socket)?;
-        let folders: Vec<_> = paths.iter().filter(|p| p.is_dir()).cloned().collect();
-        let files: Vec<_> = paths.iter().filter(|p| p.is_file()).cloned().collect();
-        let msg: CoreMessage =
-            RpcMessage::Notification(CoreNotification::OpenPaths {
-                window_tab_id: None,
-                folders,
-                files,
-            });
-        lapce_rpc::stdio::write_msg(&mut socket, msg)?;
-
-        let (tx, rx) = crossbeam_channel::bounded(1);
-        thread::spawn(move || {
-            let mut buf = [0; 100];
-            let received = if let Ok(n) = socket.read(&mut buf) {
-                &buf[..n] == b"received"
-            } else {
-                false
-            };
-            tx.send(received)
-        });
-
-        let received = rx.recv_timeout(std::time::Duration::from_millis(500))?;
-        if !received {
-            return Err(anyhow!("didn't receive response"));
-        }
-
-        Ok(())
     }
 }
 
