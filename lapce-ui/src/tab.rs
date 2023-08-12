@@ -44,7 +44,7 @@ use lapce_data::{
 };
 use lapce_rpc::proxy::ProxyResponse;
 use lapce_xi_rope::Rope;
-use lsp_types::DiagnosticSeverity;
+use psp_types::lsp_types::DiagnosticSeverity;
 
 use crate::{
     about::AboutBox, alert::AlertBox, completion::CompletionContainer,
@@ -1211,48 +1211,53 @@ impl LapceTab {
                     }
                     LapceUICommand::WorkDoneProgress(params) => {
                         match &params.value {
-                            lsp_types::ProgressParamsValue::WorkDone(progress) => {
-                                match progress {
-                                    lsp_types::WorkDoneProgress::Begin(begin) => {
-                                        Arc::make_mut(&mut data.progresses).push(
-                                            WorkProgress {
-                                                token: params.token.clone(),
-                                                title: begin.title.clone(),
-                                                message: begin.message.clone(),
-                                                percentage: begin.percentage,
-                                            },
-                                        );
-                                    }
-                                    lsp_types::WorkDoneProgress::Report(report) => {
-                                        for p in Arc::make_mut(&mut data.progresses)
-                                            .iter_mut()
-                                        {
-                                            if p.token == params.token {
-                                                p.message = report.message.clone();
-                                                p.percentage = report.percentage;
-                                            }
-                                        }
-                                    }
-                                    lsp_types::WorkDoneProgress::End(_end) => {
-                                        for view_id in data.main_split.editors.keys()
-                                        {
-                                            let editor_data =
-                                                data.editor_view_content(*view_id);
-                                            editor_data.doc.get_inlay_hints();
-                                        }
-                                        for i in data
-                                            .progresses
-                                            .iter()
-                                            .positions(|p| p.token == params.token)
-                                            .sorted()
-                                            .rev()
-                                        {
-                                            Arc::make_mut(&mut data.progresses)
-                                                .remove(i);
+                            psp_types::lsp_types::ProgressParamsValue::WorkDone(
+                                progress,
+                            ) => match progress {
+                                psp_types::lsp_types::WorkDoneProgress::Begin(
+                                    begin,
+                                ) => {
+                                    Arc::make_mut(&mut data.progresses).push(
+                                        WorkProgress {
+                                            token: params.token.clone(),
+                                            title: begin.title.clone(),
+                                            message: begin.message.clone(),
+                                            percentage: begin.percentage,
+                                        },
+                                    );
+                                }
+                                psp_types::lsp_types::WorkDoneProgress::Report(
+                                    report,
+                                ) => {
+                                    for p in Arc::make_mut(&mut data.progresses)
+                                        .iter_mut()
+                                    {
+                                        if p.token == params.token {
+                                            p.message = report.message.clone();
+                                            p.percentage = report.percentage;
                                         }
                                     }
                                 }
-                            }
+                                psp_types::lsp_types::WorkDoneProgress::End(
+                                    _end,
+                                ) => {
+                                    for view_id in data.main_split.editors.keys() {
+                                        let editor_data =
+                                            data.editor_view_content(*view_id);
+                                        editor_data.doc.get_inlay_hints();
+                                    }
+                                    for i in data
+                                        .progresses
+                                        .iter()
+                                        .positions(|p| p.token == params.token)
+                                        .sorted()
+                                        .rev()
+                                    {
+                                        Arc::make_mut(&mut data.progresses)
+                                            .remove(i);
+                                    }
+                                }
+                            },
                         }
                     }
                     LapceUICommand::PublishDiagnostics(diagnostics) => {

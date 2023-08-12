@@ -19,7 +19,7 @@ use lapce_data::{
     },
 };
 use lapce_rpc::source_control::FileDiff;
-use lsp_types::SymbolKind;
+use psp_types::lsp_types::SymbolKind;
 
 use crate::{
     editor::view::LapceEditorView,

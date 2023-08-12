@@ -14,7 +14,7 @@ use lapce_core::{
 };
 use lapce_rpc::buffer::BufferId;
 use lapce_xi_rope::{interval::IntervalBounds, rope::Rope, RopeDelta};
-use lsp_types::*;
+use psp_types::lsp_types::*;
 
 #[derive(Clone)]
 pub struct Buffer {

@@ -17,7 +17,7 @@ use lapce_xi_rope::{
     tree::{Node, NodeInfo},
     Cursor, Delta, DeltaBuilder, DeltaElement, Interval, Rope, RopeDelta, RopeInfo,
 };
-use lsp_types::Position;
+use psp_types::lsp_types::Position;
 
 use crate::{
     char_buffer::CharBuffer,

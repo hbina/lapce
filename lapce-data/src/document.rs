@@ -42,7 +42,7 @@ use lapce_xi_rope::{
     spans::{Spans, SpansBuilder},
     Interval, Rope, RopeDelta, Transformer,
 };
-use lsp_types::{
+use psp_types::lsp_types::{
     CodeActionOrCommand, CodeActionResponse, DiagnosticSeverity, InlayHint,
     InlayHintLabel, MessageType, ShowMessageParams,
 };

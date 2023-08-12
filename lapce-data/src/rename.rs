@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use druid::{Command, EventCtx, ExtEventSink, Target, WidgetId};
 use lapce_core::buffer::Buffer;
 use lapce_xi_rope::Rope;
-use lsp_types::{Position, PrepareRenameResponse};
+use psp_types::lsp_types::{Position, PrepareRenameResponse};
 
 use crate::{
     command::{LapceUICommand, LAPCE_UI_COMMAND},
@@ -116,12 +116,12 @@ impl RenameData {
         event_sink: ExtEventSink,
     ) {
         let (start, end, placeholder) = match resp {
-            lsp_types::PrepareRenameResponse::Range(range) => (
+            psp_types::lsp_types::PrepareRenameResponse::Range(range) => (
                 buffer.offset_of_position(&range.start),
                 buffer.offset_of_position(&range.end),
                 None,
             ),
-            lsp_types::PrepareRenameResponse::RangeWithPlaceholder {
+            psp_types::lsp_types::PrepareRenameResponse::RangeWithPlaceholder {
                 range,
                 placeholder,
             } => (
@@ -129,7 +129,9 @@ impl RenameData {
                 buffer.offset_of_position(&range.end),
                 Some(placeholder),
             ),
-            lsp_types::PrepareRenameResponse::DefaultBehavior { .. } => (
+            psp_types::lsp_types::PrepareRenameResponse::DefaultBehavior {
+                ..
+            } => (
                 buffer.prev_code_boundary(offset),
                 buffer.next_code_boundary(offset),
                 None,

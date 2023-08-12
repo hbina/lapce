@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use druid::{Size, WidgetId};
 use lapce_rpc::{buffer::BufferId, plugin::PluginId};
-use lsp_types::{Position, SignatureHelp, SignatureInformation};
+use psp_types::lsp_types::{Position, SignatureHelp, SignatureInformation};
 
 use crate::proxy::LapceProxy;
 

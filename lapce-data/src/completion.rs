@@ -6,8 +6,10 @@ use druid::{EventCtx, Size, WidgetId};
 use fuzzy_matcher::{skim::SkimMatcherV2, FuzzyMatcher};
 use lapce_core::command::FocusCommand;
 use lapce_rpc::{buffer::BufferId, plugin::PluginId};
-use lsp_types::{CompletionItem, CompletionResponse, CompletionTextEdit, Position};
 use once_cell::sync::Lazy;
+use psp_types::lsp_types::{
+    CompletionItem, CompletionResponse, CompletionTextEdit, Position,
+};
 use regex::Regex;
 
 use crate::{
@@ -527,10 +529,9 @@ impl CompletionData {
                 if let Some(edit) = &item.item.text_edit {
                     // There's a text edit, which is used rather than the label
 
-                    let text_format = item
-                        .item
-                        .insert_text_format
-                        .unwrap_or(lsp_types::InsertTextFormat::PLAIN_TEXT);
+                    let text_format = item.item.insert_text_format.unwrap_or(
+                        psp_types::lsp_types::InsertTextFormat::PLAIN_TEXT,
+                    );
 
                     match edit {
                         CompletionTextEdit::Edit(edit) => {
@@ -554,13 +555,13 @@ impl CompletionData {
                                 None
                             } else {
                                 match text_format {
-                                    lsp_types::InsertTextFormat::PLAIN_TEXT => {
+                                    psp_types::lsp_types::InsertTextFormat::PLAIN_TEXT => {
                                         // This isn't entirely correcty because it assumes that the position is `{start,end}_offset` when it may not necessarily be.
                                         let text = &edit.new_text;
 
                                         Some(Cow::Borrowed(text))
                                     }
-                                    lsp_types::InsertTextFormat::SNIPPET => {
+                                    psp_types::  lsp_types::InsertTextFormat::SNIPPET => {
                                         // TODO: Don't unwrap
                                         let snippet =
                                             Snippet::from_str(&edit.new_text)

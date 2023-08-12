@@ -11,7 +11,7 @@ use super::plugin::VoltID;
 use crossbeam_channel::{Receiver, Sender};
 use indexmap::IndexMap;
 use lapce_xi_rope::RopeDelta;
-use lsp_types::{
+use psp_types::lsp_types::{
     request::GotoTypeDefinitionResponse, CodeAction, CodeActionResponse,
     CompletionItem, Diagnostic, DocumentSymbolResponse, GotoDefinitionResponse,
     Hover, InlayHint, Location, Position, PrepareRenameResponse, SelectionRange,

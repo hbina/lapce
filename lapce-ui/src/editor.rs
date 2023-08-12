@@ -31,7 +31,7 @@ use lapce_data::{
     panel::{PanelData, PanelKind},
     selection_range::SyntaxSelectionRanges,
 };
-use lsp_types::{CodeActionOrCommand, DiagnosticSeverity};
+use psp_types::lsp_types::{CodeActionOrCommand, DiagnosticSeverity};
 
 pub mod bread_crumb;
 pub mod container;

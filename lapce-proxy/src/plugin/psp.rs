@@ -19,7 +19,8 @@ use lapce_rpc::{
     RpcError,
 };
 use lapce_xi_rope::{Rope, RopeDelta};
-use lsp_types::{
+use parking_lot::Mutex;
+use psp_types::lsp_types::{
     notification::{
         DidChangeTextDocument, DidOpenTextDocument, DidSaveTextDocument,
         Initialized, LogMessage, Notification, Progress, PublishDiagnostics,
@@ -31,7 +32,7 @@ use lsp_types::{
         HoverRequest, Initialize, InlayHintRequest, PrepareRenameRequest,
         References, RegisterCapability, Rename, ResolveCompletionItem,
         SelectionRangeRequest, SemanticTokensFullRequest, SignatureHelpRequest,
-        WorkDoneProgressCreate, WorkspaceSymbol,
+        WorkDoneProgressCreate, WorkspaceSymbolResolve,
     },
     CodeActionProviderCapability, DidChangeTextDocumentParams,
     DidSaveTextDocumentParams, DocumentSelector, HoverProviderCapability,
@@ -43,7 +44,6 @@ use lsp_types::{
     TextDocumentSyncCapability, TextDocumentSyncKind, TextDocumentSyncSaveOptions,
     VersionedTextDocumentIdentifier,
 };
-use parking_lot::Mutex;
 use psp_types::{
     ExecuteProcess, ExecuteProcessParams, ExecuteProcessResult, Request,
     StartLspServer, StartLspServerParams,
@@ -705,7 +705,7 @@ impl PluginHostHandler {
             DocumentSymbolRequest::METHOD => {
                 self.server_capabilities.document_symbol_provider.is_some()
             }
-            WorkspaceSymbol::METHOD => {
+            WorkspaceSymbolResolve::METHOD => {
                 self.server_capabilities.workspace_symbol_provider.is_some()
             }
             PrepareRenameRequest::METHOD => {

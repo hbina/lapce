@@ -27,14 +27,15 @@ use lapce_rpc::{
     RequestId, RpcError,
 };
 use lapce_xi_rope::{Rope, RopeDelta};
-use lsp_types::{
+use parking_lot::Mutex;
+use psp_types::lsp_types::{
     request::{
         CodeActionRequest, CodeActionResolveRequest, Completion,
         DocumentSymbolRequest, Formatting, GotoDefinition, GotoTypeDefinition,
         GotoTypeDefinitionParams, GotoTypeDefinitionResponse, HoverRequest,
         InlayHintRequest, PrepareRenameRequest, References, Rename, Request,
         ResolveCompletionItem, SelectionRangeRequest, SemanticTokensFullRequest,
-        SignatureHelpRequest, WorkspaceSymbol,
+        SignatureHelpRequest, WorkspaceSymbolResolve,
     },
     ClientCapabilities, CodeAction, CodeActionCapabilityResolveSupport,
     CodeActionClientCapabilities, CodeActionContext, CodeActionKind,
@@ -58,7 +59,6 @@ use lsp_types::{
     WorkDoneProgressParams, WorkspaceClientCapabilities, WorkspaceEdit,
     WorkspaceSymbolClientCapabilities, WorkspaceSymbolParams,
 };
-use parking_lot::Mutex;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_json::Value;
 use tar::Archive;
@@ -491,10 +491,16 @@ impl PluginCatalogRpcHandler {
             + Send
             + 'static,
     ) {
-        let uri = Url::from_file_path(path).unwrap();
+        let url = match Url::from_file_path(path) {
+            Ok(url) => url,
+            Err(err) => {
+                println!("cannot open {:?} as a URL because '{:?}'", path, err);
+                return;
+            }
+        };
         let method = CodeActionRequest::METHOD;
         let params = CodeActionParams {
-            text_document: TextDocumentIdentifier { uri },
+            text_document: TextDocumentIdentifier { uri: url },
             range: Range {
                 start: position,
                 end: position,
@@ -502,6 +508,7 @@ impl PluginCatalogRpcHandler {
             context: CodeActionContext {
                 diagnostics,
                 only: None,
+                trigger_kind: None,
             },
             work_done_progress_params: WorkDoneProgressParams::default(),
             partial_result_params: PartialResultParams::default(),
@@ -578,7 +585,7 @@ impl PluginCatalogRpcHandler {
             + Send
             + 'static,
     ) {
-        let method = WorkspaceSymbol::METHOD;
+        let method = WorkspaceSymbolResolve::METHOD;
         let params = WorkspaceSymbolParams {
             query,
             work_done_progress_params: WorkDoneProgressParams::default(),
@@ -914,13 +921,15 @@ impl PluginCatalogRpcHandler {
         version: i32,
         text: String,
     ) {
+        let url = match Url::from_file_path(path) {
+            Ok(url) => url,
+            Err(err) => {
+                println!("cannot open {:?} as a URL because '{:?}'", path, err);
+                return;
+            }
+        };
         let _ = self.plugin_tx.send(PluginCatalogRpc::DidOpenTextDocument {
-            document: TextDocumentItem::new(
-                Url::from_file_path(path).unwrap(),
-                language_id,
-                version,
-                text,
-            ),
+            document: TextDocumentItem::new(url, language_id, version, text),
         });
     }
 

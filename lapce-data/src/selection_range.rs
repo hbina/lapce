@@ -1,5 +1,5 @@
 use lapce_rpc::buffer::BufferId;
-use lsp_types::{Range, SelectionRange};
+use psp_types::lsp_types::{Range, SelectionRange};
 
 /// Lsp [selectionRange](https://microsoft.github.io/language-server-protocol/specifications/lsp/3.17/specification/#selectionRange)
 /// are used to do "smart" syntax selection. A buffer id, buffer revision and cursor position are
@@ -94,7 +94,7 @@ impl SyntaxSelectionRanges {
 #[cfg(test)]
 mod test {
     use lapce_rpc::buffer::BufferId;
-    use lsp_types::{Position, Range, SelectionRange};
+    use psp_types::lsp_types::{Position, Range, SelectionRange};
 
     use crate::selection_range::SyntaxSelectionRanges;
 

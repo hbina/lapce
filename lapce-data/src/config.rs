@@ -12,7 +12,7 @@ use indexmap::IndexMap;
 use lapce_core::directory::Directory;
 use lapce_proxy::plugin::wasi::find_all_volts;
 use lapce_rpc::plugin::VoltID;
-use lsp_types::{CompletionItemKind, SymbolKind};
+use psp_types::lsp_types::{CompletionItemKind, SymbolKind};
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};

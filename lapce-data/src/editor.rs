@@ -29,7 +29,7 @@ use lapce_core::{
 };
 use lapce_rpc::{plugin::PluginId, proxy::ProxyResponse};
 use lapce_xi_rope::{Rope, RopeDelta, Transformer};
-use lsp_types::{
+use psp_types::lsp_types::{
     request::GotoTypeDefinitionResponse, CodeAction, CodeActionOrCommand,
     CodeActionResponse, CompletionItem, CompletionTextEdit, DiagnosticSeverity,
     DocumentChangeOperation, DocumentChanges, GotoDefinitionResponse, Location,
@@ -579,7 +579,7 @@ impl LapceEditorBufferData {
 
         let text_format = item
             .insert_text_format
-            .unwrap_or(lsp_types::InsertTextFormat::PLAIN_TEXT);
+            .unwrap_or(psp_types::lsp_types::InsertTextFormat::PLAIN_TEXT);
         if let Some(edit) = &item.text_edit {
             match edit {
                 CompletionTextEdit::Edit(edit) => {
@@ -596,7 +596,7 @@ impl LapceEditorBufferData {
                         end_offset.max(edit_end),
                     );
                     match text_format {
-                        lsp_types::InsertTextFormat::PLAIN_TEXT => {
+                        psp_types::lsp_types::InsertTextFormat::PLAIN_TEXT => {
                             self.completion_do_edit(
                                 &selection,
                                 &[
@@ -607,7 +607,7 @@ impl LapceEditorBufferData {
                             );
                             return Ok(());
                         }
-                        lsp_types::InsertTextFormat::SNIPPET => {
+                        psp_types::lsp_types::InsertTextFormat::SNIPPET => {
                             let snippet = Snippet::from_str(&edit.new_text)?;
                             let text = snippet.text();
                             let old_cursor = self.editor.cursor.mode.clone();

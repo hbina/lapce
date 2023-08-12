@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc, sync::Arc};
 
 use druid::{ExtEventSink, Size, Target, WidgetId};
 use lapce_rpc::{buffer::BufferId, proxy::ProxyResponse};
-use lsp_types::{HoverContents, MarkedString, MarkupKind, Position};
+use psp_types::lsp_types::{HoverContents, MarkedString, MarkupKind, Position};
 
 use crate::{
     command::{LapceUICommand, LAPCE_UI_COMMAND},
@@ -183,12 +183,12 @@ impl HoverData {
                         // formatted as  diagsource(code)
                         content.push("(").text_color(dim_color.clone());
                         match code {
-                            lsp_types::NumberOrString::Number(v) => {
+                            psp_types::lsp_types::NumberOrString::Number(v) => {
                                 content
                                     .push(&v.to_string())
                                     .text_color(dim_color.clone());
                             }
-                            lsp_types::NumberOrString::String(v) => {
+                            psp_types::lsp_types::NumberOrString::String(v) => {
                                 content
                                     .push(v.as_str())
                                     .text_color(dim_color.clone());
@@ -219,7 +219,10 @@ impl Default for HoverData {
     }
 }
 
-fn parse_hover_resp(hover: lsp_types::Hover, config: &LapceConfig) -> Vec<Content> {
+fn parse_hover_resp(
+    hover: psp_types::lsp_types::Hover,
+    config: &LapceConfig,
+) -> Vec<Content> {
     match hover.contents {
         HoverContents::Scalar(text) => match text {
             MarkedString::String(text) => parse_markdown(&text, 1.5, config),

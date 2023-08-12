@@ -15,7 +15,7 @@ use lapce_core::meta;
 use lapce_rpc::plugin::VoltID;
 use lapce_rpc::{style::LineStyle, RpcError};
 use lapce_xi_rope::Rope;
-use lsp_types::{
+use psp_types::lsp_types::{
     notification::{Initialized, Notification},
     request::{Initialize, Request},
     *,
@@ -127,7 +127,7 @@ impl PluginServerHandler for LspClient {
     fn handle_did_change_text_document(
         &mut self,
         language_id: String,
-        document: lsp_types::VersionedTextDocumentIdentifier,
+        document:psp_types:: lsp_types::VersionedTextDocumentIdentifier,
         delta: lapce_xi_rope::RopeDelta,
         text: lapce_xi_rope::Rope,
         new_text: lapce_xi_rope::Rope,
@@ -402,7 +402,7 @@ impl DocumentFilter {
     /// Constructs a document filter from the LSP version
     /// This ignores any fields that are badly constructed
     pub(crate) fn from_lsp_filter_loose(
-        filter: &lsp_types::DocumentFilter,
+        filter: &psp_types::lsp_types::DocumentFilter,
     ) -> DocumentFilter {
         DocumentFilter {
             language_id: filter.language.clone(),

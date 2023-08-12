@@ -21,7 +21,7 @@ use lapce_data::{
     rich_text::{RichText, RichTextBuilder},
     signature::{SignatureData, SignatureStatus},
 };
-use lsp_types::{ParameterLabel, SignatureInformation};
+use psp_types::lsp_types::{ParameterLabel, SignatureInformation};
 
 use crate::scroll::{LapceIdentityWrapper, LapceScroll};
 

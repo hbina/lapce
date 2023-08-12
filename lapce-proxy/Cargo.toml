@@ -26,7 +26,6 @@ strum_macros.workspace = true
 tar.workspace = true
 toml_edit.workspace = true
 
-lsp-types.workspace = true
 psp-types.workspace = true
 
 lapce-xi-rope.workspace = true

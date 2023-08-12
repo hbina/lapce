@@ -15,7 +15,7 @@ use lapce_rpc::{
     RpcError,
 };
 use lapce_xi_rope::{Rope, RopeDelta};
-use lsp_types::{
+use psp_types::lsp_types::{
     notification::DidOpenTextDocument, DidOpenTextDocumentParams, SemanticTokens,
     TextDocumentIdentifier, TextDocumentItem, VersionedTextDocumentIdentifier,
 };

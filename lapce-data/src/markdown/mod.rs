@@ -6,7 +6,7 @@ use lapce_core::{
     syntax::{highlight::HighlightIssue, Syntax},
 };
 use lapce_xi_rope::Rope;
-use lsp_types::{Documentation, MarkedString, MarkupKind};
+use psp_types::lsp_types::{Documentation, MarkedString, MarkupKind};
 use pulldown_cmark::{CodeBlockKind, Tag};
 use smallvec::SmallVec;
 

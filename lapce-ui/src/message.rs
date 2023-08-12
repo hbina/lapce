@@ -11,7 +11,7 @@ use lapce_data::{
     config::{LapceConfig, LapceIcons, LapceTheme},
     data::LapceTabData,
 };
-use lsp_types::MessageType;
+use psp_types::lsp_types::MessageType;
 
 pub struct LapceMessage {
     widget_id: WidgetId,

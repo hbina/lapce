@@ -8,7 +8,7 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use lsp_types::{
+use psp_types::lsp_types::{
     CompletionResponse, LogMessageParams, ProgressParams, PublishDiagnosticsParams,
     ShowMessageParams, SignatureHelp,
 };

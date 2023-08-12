@@ -21,12 +21,12 @@ use lapce_rpc::{
     RpcError,
 };
 use lapce_xi_rope::{Rope, RopeDelta};
-use lsp_types::{
+use parking_lot::Mutex;
+use psp_types::lsp_types::{
     notification::Initialized, request::Initialize, DocumentFilter,
     InitializeParams, InitializedParams, TextDocumentContentChangeEvent,
     TextDocumentIdentifier, Url, VersionedTextDocumentIdentifier,
 };
-use parking_lot::Mutex;
 use psp_types::{Notification, Request};
 use toml_edit::easy as toml;
 use wasi_experimental_http_wasmtime::{HttpCtx, HttpState};
@@ -175,7 +175,7 @@ impl PluginServerHandler for Plugin {
 
     fn format_semantic_tokens(
         &self,
-        tokens: lsp_types::SemanticTokens,
+        tokens: psp_types::lsp_types::SemanticTokens,
         text: Rope,
         f: Box<dyn RpcCallback<Vec<LineStyle>, RpcError>>,
     ) {
@@ -372,10 +372,10 @@ pub fn start_volt(
     )?;
     let mut linker = wasmtime::Linker::new(&engine);
     wasmtime_wasi::add_to_linker(&mut linker, |s| s)?;
-    HttpState::new()?.add_to_linker(&mut linker, |_| HttpCtx {
-        allowed_hosts: Some(vec!["insecure:allow-all".to_string()]),
-        max_concurrent_requests: Some(100),
-    })?;
+    // HttpState::new()?.add_to_linker(&mut linker, |_| HttpCtx {
+    //     allowed_hosts: Some(vec!["insecure:allow-all".to_string()]),
+    //     max_concurrent_requests: Some(100),
+    // })?;
 
     let volt_path = meta
         .dir

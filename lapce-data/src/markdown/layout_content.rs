@@ -6,7 +6,7 @@ use druid::{
     ArcStr, Color, Env, EventCtx, ExtEventSink, FontDescriptor, PaintCtx, Point,
     Rect, RenderContext, Size, TextLayout, UpdateCtx, Vec2,
 };
-use lsp_types::Url;
+use psp_types::lsp_types::Url;
 
 use crate::{
     config::{LapceConfig, LapceIcons, LapceTheme},

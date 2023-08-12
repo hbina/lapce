@@ -23,7 +23,7 @@ use lapce_core::{
     mode::Mode,
 };
 use lapce_rpc::{proxy::ProxyResponse, source_control::FileDiff};
-use lsp_types::{DocumentSymbolResponse, Position, Range, SymbolKind};
+use psp_types::lsp_types::{DocumentSymbolResponse, Position, Range, SymbolKind};
 use uuid::Uuid;
 
 use crate::{

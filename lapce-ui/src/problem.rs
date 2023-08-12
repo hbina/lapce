@@ -15,7 +15,7 @@ use lapce_data::{
     problem::ProblemData,
     proxy::path_from_url,
 };
-use lsp_types::DiagnosticSeverity;
+use psp_types::lsp_types::DiagnosticSeverity;
 
 use crate::panel::{LapcePanel, PanelHeaderKind, PanelSizing};
 

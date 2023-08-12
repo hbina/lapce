@@ -25,7 +25,7 @@ serde_json.workspace = true
 smallvec.workspace = true
 toml_edit.workspace = true
 
-lsp-types.workspace = true
+psp-types.workspace = true
 
 lapce-xi-rope.workspace = true
 

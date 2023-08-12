@@ -23,7 +23,7 @@ use lapce_rpc::{
     terminal::TermId,
 };
 use lapce_xi_rope::{spans::Spans, Rope};
-use lsp_types::{
+use psp_types::lsp_types::{
     CodeActionOrCommand, CodeActionResponse, CompletionItem, CompletionResponse,
     InlayHint, Location, MessageType, Position, ProgressParams,
     PublishDiagnosticsParams, SelectionRange, SignatureHelp, TextEdit, Url,

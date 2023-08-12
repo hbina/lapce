@@ -31,7 +31,7 @@ use lapce_rpc::{
     RequestId, RpcError,
 };
 use lapce_xi_rope::Rope;
-use lsp_types::{Position, Range, TextDocumentItem, Url};
+use psp_types::lsp_types::{Position, Range, TextDocumentItem, Url};
 use parking_lot::Mutex;
 
 use crate::{
