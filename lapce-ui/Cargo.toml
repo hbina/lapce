@@ -6,7 +6,8 @@ edition.workspace = true
 
 [dependencies]
 alacritty_terminal.workspace = true
-crossbeam-channel.workspace = true
+crossbeam-channel = "0.5.0"
+# crossbeam-channel.workspace = true
 anyhow.workspace = true
 chrono.workspace = true
 clap.workspace = true

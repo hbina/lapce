@@ -3,12 +3,12 @@ name = "lapce"
 version = "0.2.6"
 authors = ["Dongdong Zhou <dzhou121@gmail.com>"]
 edition = "2021"
-rust-version = "1.65"
 default-run = "lapce"
 
 [dependencies]
 lapce-ui = { path = "./lapce-ui" }
 lapce-proxy = { path = "./lapce-proxy" }
+crossbeam-channel = "0.5.0"
 
 [[bin]]
 name = "lapce"

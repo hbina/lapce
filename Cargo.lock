@@ -2771,6 +2771,7 @@ dependencies = [
 name = "lapce"
 version = "0.2.6"
 dependencies = [
+ "crossbeam-channel",
  "lapce-proxy",
  "lapce-ui",
 ]
