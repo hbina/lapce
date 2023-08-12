@@ -1,0 +1,86 @@
+[package]
+name = "lapce-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+directories.workspace = true
+itertools.workspace = true
+log.workspace = true
+once_cell.workspace = true
+serde.workspace = true
+strum.workspace = true
+strum_macros.workspace = true
+thiserror.workspace = true
+
+lsp-types.workspace = true
+
+lapce-xi-rope.workspace = true
+
+lapce-rpc.workspace = true
+
+bitflags = "1.3.2"
+slotmap = "1.0"
+arc-swap = "1.5.1"
+
+# please keep below dependencies and features sorted just like LANGUAGES in language.rs
+
+
+[features]
+default = []
+# See lapce-ui/Cargo.toml for how to choose the languages.  See also
+# src/language.rs for how to add new languages.  The feature names should follow
+# the tree-sitter crate names.
+lang-bash = ["dep:tree-sitter-bash"]
+lang-c = ["dep:tree-sitter-c"]
+lang-clojure = ["dep:tree-sitter-clojure"]
+lang-cmake = ["dep:tree-sitter-cmake"]
+lang-cpp = ["dep:tree-sitter-cpp"]
+lang-csharp = ["dep:tree-sitter-c-sharp"]
+lang-css = ["dep:tree-sitter-css"]
+lang-d = ["dep:tree-sitter-d"]
+lang-dart = ["dep:tree-sitter-dart"]
+lang-dockerfile = ["dep:tree-sitter-dockerfile"]
+lang-elixir = ["dep:tree-sitter-elixir"]
+lang-elm = ["dep:tree-sitter-elm"]
+lang-erlang = ["dep:tree-sitter-erlang"]
+lang-glimmer = ["dep:tree-sitter-glimmer"]
+lang-glsl = ["dep:tree-sitter-glsl"]
+lang-go = ["dep:tree-sitter-go"]
+lang-hare = ["dep:tree-sitter-hare"]
+lang-haskell = ["dep:tree-sitter-haskell"]
+lang-haxe = ["dep:tree-sitter-haxe"]
+lang-hcl = ["dep:tree-sitter-hcl"]
+lang-html = ["dep:tree-sitter-html"]
+lang-java = ["dep:tree-sitter-java"]
+lang-javascript = ["dep:tree-sitter-javascript"]
+lang-json = ["dep:tree-sitter-json"]
+lang-julia = ["dep:tree-sitter-julia"]
+lang-kotlin = ["dep:tree-sitter-kotlin"]
+lang-latex = ["dep:tree-sitter-latex"]
+lang-lua = ["dep:tree-sitter-lua"]
+lang-markdown = ["dep:tree-sitter-md"]
+lang-nix = ["dep:tree-sitter-nix"]
+lang-ocaml = ["dep:tree-sitter-ocaml"]
+lang-php = ["dep:tree-sitter-php"]
+lang-prisma = ["dep:tree-sitter-prisma-io"]
+lang-protobuf = ["dep:tree-sitter-protobuf"]
+lang-python = ["dep:tree-sitter-python"]
+lang-ql = ["dep:tree-sitter-ql"]
+lang-r = ["dep:tree-sitter-r"]
+lang-ruby = ["dep:tree-sitter-ruby"]
+lang-rust = ["dep:tree-sitter-rust"]
+lang-scheme = ["dep:tree-sitter-scheme"]
+lang-scss = ["dep:tree-sitter-scss"]
+lang-sql = ["dep:tree-sitter-sql"]
+lang-svelte = ["dep:tree-sitter-svelte"]
+lang-swift = ["dep:tree-sitter-swift"]
+lang-toml = ["dep:tree-sitter-toml"]
+lang-typescript = ["dep:tree-sitter-typescript"]
+lang-vue = ["dep:tree-sitter-vue"]
+lang-wgsl = ["dep:tree-sitter-wgsl"]
+lang-yaml = ["dep:tree-sitter-yaml"]
+lang-xml = ["dep:tree-sitter-xml"]
+lang-zig = ["dep:tree-sitter-zig"]
