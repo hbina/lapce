@@ -4,7 +4,7 @@ use std::{
     collections::{HashMap, HashSet},
     env,
     fmt::Display,
-    io::{BufReader, Read, Write},
+    hash::Hash,
     path::{Path, PathBuf},
     rc::Rc,
     sync::Arc,
@@ -12,7 +12,7 @@ use std::{
     time::Instant,
 };
 
-use anyhow::{anyhow, Result};
+use anyhow::Result;
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use druid::{
     piet::PietText, theme, Command, Data, Env, EventCtx, ExtEventSink,
@@ -31,14 +31,13 @@ use lapce_core::{
     register::Register,
     selection::Selection,
 };
+use lapce_proxy::cli::PathObject;
 use lapce_rpc::{
     buffer::BufferId,
-    core::{CoreMessage, CoreNotification},
     plugin::{VoltID, VoltInfo},
     proxy::ProxyResponse,
     source_control::FileDiff,
     terminal::TermId,
-    RpcMessage,
 };
 use lapce_xi_rope::{Rope, RopeDelta};
 use lsp_types::{Diagnostic, DiagnosticSeverity, Position, ProgressToken, TextEdit};
@@ -118,7 +117,7 @@ impl LapceData {
     /// previously written to the Lapce database.
     pub fn load(
         event_sink: ExtEventSink,
-        paths: Vec<PathBuf>,
+        paths: Vec<PathObject>,
         log_file: Option<PathBuf>,
     ) -> Self {
         let log_file = Arc::new(log_file);
@@ -131,8 +130,13 @@ impl LapceData {
             .unwrap_or_else(|_| Self::default_panel_orders());
         let latest_release = Arc::new(None);
 
-        let dirs: Vec<&PathBuf> = paths.iter().filter(|p| p.is_dir()).collect();
-        let files: Vec<&PathBuf> = paths.iter().filter(|p| p.is_file()).collect();
+        let pwd = std::env::current_dir().unwrap_or_default();
+
+        // Split user input into known existing directors and
+        // file paths that exist or not
+        let (dirs, files): (Vec<&PathObject>, Vec<&PathObject>) =
+            paths.iter().partition(|p| p.path.is_dir());
+
         if !dirs.is_empty() {
             let (size, mut pos) = db
                 .get_last_window_info()
@@ -160,7 +164,7 @@ impl LapceData {
                         active_tab: 0,
                         workspaces: vec![LapceWorkspace {
                             kind: workspace_type,
-                            path: Some(dir.to_path_buf()),
+                            path: Some(dir.path.to_owned()),
                             last_open: 0,
                         }],
                     },
@@ -226,13 +230,46 @@ impl LapceData {
             windows.insert(window.window_id, window);
         }
 
-        if let Some((window_id, _)) = windows.iter().next() {
+        if let Some((window_id, data)) = windows.iter().next() {
             for file in files {
-                let _ = event_sink.submit_command(
-                    LAPCE_UI_COMMAND,
-                    LapceUICommand::OpenFile(file.to_path_buf(), false),
-                    Target::Window(*window_id),
-                );
+                let file_path = match file.path.canonicalize() {
+                    Ok(v) => v,
+                    _ => pwd.join(&file.path),
+                };
+                for (widget_id, _) in &data.tabs {
+                    if let Some(pos) = file.linecol {
+                        // jump to line and column
+                        if let Err(err) = event_sink.submit_command(
+                            LAPCE_UI_COMMAND,
+                            LapceUICommand::JumpToLineColLocation(
+                                None,
+                                EditorLocation {
+                                    path: file_path.clone(),
+                                    position: Some(pos), // line info is included in column variable
+                                    scroll_offset: None,
+                                    history: None,
+                                },
+                                false,
+                            ),
+                            Target::Widget(*widget_id),
+                        ) {
+                            log::warn!("Failed to lauch: {err}");
+                        } else {
+                            break;
+                        };
+                    } else {
+                        // open the file
+                        if let Err(err) = event_sink.submit_command(
+                            LAPCE_UI_COMMAND,
+                            LapceUICommand::OpenFile(file_path.clone(), false),
+                            Target::Window(*window_id),
+                        ) {
+                            log::warn!("Failed to lauch: {err}");
+                        } else {
+                            break;
+                        };
+                    }
+                }
             }
         }
 
@@ -701,6 +738,13 @@ impl LapceTabData {
             event_sink.clone(),
         );
         main_split.add_editor(
+            settings.filter_editor_id,
+            None,
+            LocalBufferKind::SettingsFilter,
+            &config,
+            event_sink.clone(),
+        );
+        main_split.add_editor(
             rename.view_id,
             None,
             LocalBufferKind::Rename,
@@ -818,10 +862,10 @@ impl LapceTabData {
         }
     }
 
-    /// Get information about the specific editor, with various data so that it can provide useful  
-    /// utility functions for the editor buffer.  
+    /// Get information about the specific editor, with various data so that it can provide useful
+    /// utility functions for the editor buffer.
     /// Note that if you edit the editor buffer or related fields, then you'll have to 'give it
-    /// back' to [`LapceTabData`] so that it can update the internals.  
+    /// back' to [`LapceTabData`] so that it can update the internals.
     /// ```rust,ignore
     /// // Get the editor before it may be modified by the `editor_data`
     /// let editor = data.main_split.editors.get(&view_id).unwrap().clone();
@@ -912,7 +956,7 @@ impl LapceTabData {
         }
     }
 
-    /// Update the stored information with the changed editor buffer data.  
+    /// Update the stored information with the changed editor buffer data.
     /// ```rust,ignore
     /// // Get the editor before it may be modified by the `editor_data`
     /// let editor = data.main_split.editors.get(&view_id).unwrap().clone();
@@ -1264,20 +1308,32 @@ impl LapceTabData {
                 }
             }
             LapceWorkbenchCommand::RevealActiveFileInFileExplorer => {
-                let path = if let Some(editor) = self.main_split.active_editor() {
-                    match &editor.content {
-                        BufferContent::File(path) => path,
-                        _ => return,
-                    }
-                } else {
-                    return;
-                };
-
-                ctx.submit_command(Command::new(
-                    LAPCE_UI_COMMAND,
-                    LapceUICommand::RevealInFileExplorer(path.to_owned()),
-                    Target::Auto,
-                ))
+                if let Some(LapceEditorData {
+                    content: BufferContent::File(path),
+                    ..
+                }) = self.main_split.active_editor()
+                {
+                    ctx.submit_command(Command::new(
+                        LAPCE_UI_COMMAND,
+                        LapceUICommand::RevealInFileExplorer(path.to_owned()),
+                        Target::Auto,
+                    ));
+                }
+            }
+            LapceWorkbenchCommand::RevealActiveFileInFileTree => {
+                if let Some(LapceEditorData {
+                    content: BufferContent::File(path),
+                    ..
+                }) = self.main_split.active_editor()
+                {
+                    ctx.submit_command(Command::new(
+                        LAPCE_UI_COMMAND,
+                        LapceUICommand::ExplorerRevealPath {
+                            path: path.to_owned(),
+                        },
+                        Target::Widget(self.file_explorer.widget_id),
+                    ));
+                }
             }
             LapceWorkbenchCommand::EnableModal => {
                 let config = Arc::make_mut(&mut self.config);
@@ -2819,9 +2875,9 @@ impl LapceMainSplitData {
         return Arc::make_mut(self.editors.get_mut(&new_editor.view_id).unwrap());
     }
 
-    /// If the supplied `editor_view_id` is some, then this simply returns the editor data for it.  
+    /// If the supplied `editor_view_id` is some, then this simply returns the editor data for it.
     /// Otherwise, we check the active tab (and friends if `same_tab` is false) to see if there is
-    /// an existing editor that matches the parameters. If not, we create a new editor.  
+    /// an existing editor that matches the parameters. If not, we create a new editor.
     /// Note that this does not load the file into the editor. See
     /// [`LapceMainSplitData::jump_to_location`] or [`LapceMainSplitData::go_to_location`] for
     /// creating the editor and loading the file.
@@ -3029,7 +3085,7 @@ impl LapceMainSplitData {
         )
     }
 
-    /// Jump to a specific location, getting/creating the editor as needed.  
+    /// Jump to a specific location, getting/creating the editor as needed.
     /// This version allows a callback which will be called once the buffer is loaded.
     pub fn jump_to_location_cb<
         P: EditorPosition + Send + 'static,
@@ -4179,6 +4235,13 @@ pub enum InlineFindDirection {
     Right,
 }
 
+#[derive(Clone, Debug)]
+pub enum ModalCommand {
+    InlineFind(InlineFindDirection),
+    CreateMark,
+    GoToMark,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum EditorTabChild {
     Editor(WidgetId, WidgetId, Option<(WidgetId, WidgetId)>),
@@ -4321,8 +4384,9 @@ pub struct LapceEditorData {
     pub snippet: Option<Vec<(usize, (usize, usize))>>,
     pub last_movement_new: Movement,
     pub last_inline_find: Option<(InlineFindDirection, String)>,
-    pub inline_find: Option<InlineFindDirection>,
     pub motion_mode: Option<MotionMode>,
+    pub next_modal_command: Option<ModalCommand>,
+    pub marks: HashMap<String, Position>,
 }
 
 impl LapceEditorData {
@@ -4364,9 +4428,10 @@ impl LapceEditorData {
             window_origin: Rc::new(RefCell::new(Point::ZERO)),
             snippet: None,
             last_movement_new: Movement::Left,
-            inline_find: None,
             last_inline_find: None,
             motion_mode: None,
+            next_modal_command: None,
+            marks: HashMap::new(),
         }
     }
 

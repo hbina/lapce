@@ -6,6 +6,15 @@
 
 ### Bug Fixes
 
+## 0.2.8
+
+### Features/Changes
+
+- [#1964](https://github.com/lapce/lapce/pull/1964): Add option to open files at line/column
+- [#2403](https://github.com/lapce/lapce/pull/2403): Add basic Vim marks feature
+
+### Bug Fixes
+
 ## 0.2.7
 
 ### Features/Changes

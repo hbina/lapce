@@ -22,6 +22,7 @@ use lapce_data::{
     },
     db::{TabsInfo, WindowInfo},
 };
+use lapce_proxy::cli::{PathObject, PathObjectType};
 
 use crate::{
     logging::override_log_levels,
@@ -30,8 +31,8 @@ use crate::{
 };
 
 #[derive(Parser)]
-#[clap(name = "Lapce")]
-#[clap(version=*meta::VERSION)]
+#[clap(name = meta::NAME)]
+#[clap(version = meta::VERSION)]
 #[derive(Debug)]
 struct Cli {
     paths: Vec<PathBuf>,
@@ -106,7 +107,20 @@ pub fn launch() {
         .install_panic_hook();
 
     let mut launcher = AppLauncher::new().delegate(LapceAppDelegate::new());
-    let mut data = LapceData::load(launcher.get_external_handle(), paths, log_file);
+    let mut data = LapceData::load(
+        launcher.get_external_handle(),
+        cli.paths
+            .into_iter()
+            .map(|p| {
+                if p.is_file() {
+                    PathObject::from_path(p, PathObjectType::File)
+                } else {
+                    PathObject::from_path(p, PathObjectType::Directory)
+                }
+            })
+            .collect::<Vec<_>>(),
+        log_file,
+    );
 
     for (_window_id, window_data) in data.windows.iter_mut() {
         let root = build_window(window_data);
