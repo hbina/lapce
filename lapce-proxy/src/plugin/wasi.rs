@@ -22,14 +22,16 @@ use lapce_rpc::{
 };
 use lapce_xi_rope::{Rope, RopeDelta};
 use parking_lot::Mutex;
-use psp_types::lsp_types::{
-    notification::Initialized, request::Initialize, DocumentFilter,
-    InitializeParams, InitializedParams, TextDocumentContentChangeEvent,
-    TextDocumentIdentifier, Url, VersionedTextDocumentIdentifier,
+use psp_types::{
+    lsp_types::{
+        notification::Initialized, request::Initialize, DocumentFilter,
+        InitializeParams, InitializedParams, SemanticTokens,
+        TextDocumentContentChangeEvent, TextDocumentIdentifier, Url,
+        VersionedTextDocumentIdentifier,
+    },
+    {Notification, Request},
 };
-use psp_types::{Notification, Request};
 use toml_edit::easy as toml;
-use wasi_experimental_http_wasmtime::{HttpCtx, HttpState};
 use wasmtime_wasi::WasiCtxBuilder;
 
 use super::{
@@ -175,7 +177,7 @@ impl PluginServerHandler for Plugin {
 
     fn format_semantic_tokens(
         &self,
-        tokens: psp_types::lsp_types::SemanticTokens,
+        tokens: SemanticTokens,
         text: Rope,
         f: Box<dyn RpcCallback<Vec<LineStyle>, RpcError>>,
     ) {

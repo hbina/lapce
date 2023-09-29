@@ -15,12 +15,12 @@ use lapce_core::meta;
 use lapce_rpc::plugin::VoltID;
 use lapce_rpc::{style::LineStyle, RpcError};
 use lapce_xi_rope::Rope;
+use parking_lot::Mutex;
 use psp_types::lsp_types::{
     notification::{Initialized, Notification},
     request::{Initialize, Request},
     *,
 };
-use parking_lot::Mutex;
 use serde_json::Value;
 
 use super::{
@@ -127,7 +127,7 @@ impl PluginServerHandler for LspClient {
     fn handle_did_change_text_document(
         &mut self,
         language_id: String,
-        document:psp_types:: lsp_types::VersionedTextDocumentIdentifier,
+        document: psp_types::lsp_types::VersionedTextDocumentIdentifier,
         delta: lapce_xi_rope::RopeDelta,
         text: lapce_xi_rope::Rope,
         new_text: lapce_xi_rope::Rope,
