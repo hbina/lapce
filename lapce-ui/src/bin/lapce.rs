@@ -1,7 +1,5 @@
 use std::thread;
 
-use crossbeam_channel::{Receiver, Sender};
-
 use lapce_proxy::mainloop;
 use lapce_ui::app;
 

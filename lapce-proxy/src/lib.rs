@@ -19,8 +19,8 @@ use lapce_rpc::{
 
 pub fn mainloop(
     writer_tx: Sender<RpcMessage<CoreRequest, CoreNotification, ProxyResponse>>,
-    writer_rx: Receiver<RpcMessage<CoreRequest, CoreNotification, ProxyResponse>>,
-    reader_tx: Sender<RpcMessage<ProxyRequest, ProxyNotification, CoreResponse>>,
+    _: Receiver<RpcMessage<CoreRequest, CoreNotification, ProxyResponse>>,
+    _: Sender<RpcMessage<ProxyRequest, ProxyNotification, CoreResponse>>,
     reader_rx: Receiver<RpcMessage<ProxyRequest, ProxyNotification, CoreResponse>>,
 ) {
     let core_rpc = CoreRpcHandler::new();

@@ -1,6 +1,6 @@
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
-use std::{path::PathBuf, process::Stdio, sync::Arc};
+use std::{path::PathBuf, sync::Arc};
 
 use clap::Parser;
 use druid::{
@@ -22,7 +22,7 @@ use lapce_data::{
     },
     db::{TabsInfo, WindowInfo},
 };
-use lapce_proxy::cli::{PathObject, PathObjectType};
+use lapce_proxy::cli::PathObject;
 
 use crate::{
     logging::override_log_levels,
