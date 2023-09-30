@@ -1050,7 +1050,7 @@ impl PaletteViewData {
     fn get_lines(&mut self, _ctx: &mut EventCtx) {
         if self.focus_area == FocusArea::Panel(PanelKind::Terminal) {
             if let Some(terminal) = self.terminal.active_terminal() {
-                let raw = terminal.raw.lock();
+                let raw = terminal.raw.lock().unwrap();
                 let term = &raw.term;
                 let mut items = im::Vector::new();
                 let mut last_row: Option<String> = None;

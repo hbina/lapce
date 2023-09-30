@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     thread,
 };
@@ -19,7 +19,6 @@ use lapce_rpc::{
     RpcError,
 };
 use lapce_xi_rope::{Rope, RopeDelta};
-use parking_lot::Mutex;
 use psp_types::lsp_types::{
     notification::{
         DidChangeTextDocument, DidOpenTextDocument, DidSaveTextDocument,
@@ -244,7 +243,7 @@ impl PluginServerRpcHandler {
         rh: ResponseHandler<Value, RpcError>,
     ) {
         {
-            let mut pending = self.server_pending.lock();
+            let mut pending = self.server_pending.lock().unwrap();
             pending.insert(id.clone(), rh);
         }
         let msg = JsonRpc::request_with_params(id, method, params);
@@ -362,7 +361,7 @@ impl PluginServerRpcHandler {
     }
 
     pub fn handle_server_response(&self, id: Id, result: Result<Value, RpcError>) {
-        if let Some(handler) = { self.server_pending.lock().remove(&id) } {
+        if let Some(handler) = { self.server_pending.lock().unwrap().remove(&id) } {
             handler.invoke(result);
         }
     }
@@ -947,7 +946,7 @@ impl PluginHostHandler {
             None => TextDocumentSyncKind::NONE,
         };
 
-        let mut existing = change.lock();
+        let mut existing = change.lock().unwrap();
         let change = match kind {
             TextDocumentSyncKind::FULL => {
                 if let Some(c) = existing.0.as_ref() {

@@ -9,7 +9,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     thread,
 };
@@ -27,7 +27,6 @@ use lapce_rpc::{
     RequestId, RpcError,
 };
 use lapce_xi_rope::{Rope, RopeDelta};
-use parking_lot::Mutex;
 use psp_types::lsp_types::{
     request::{
         CodeActionRequest, CodeActionResolveRequest, Completion,
@@ -154,13 +153,13 @@ impl PluginCatalogRpcHandler {
 
     #[allow(dead_code)]
     fn handle_response(&self, id: RequestId, result: Result<Value, RpcError>) {
-        if let Some(chan) = { self.pending.lock().remove(&id) } {
+        if let Some(chan) = { self.pending.lock().unwrap().remove(&id) } {
             let _ = chan.send(result);
         }
     }
 
     pub fn mainloop(&self, plugin: &mut PluginCatalog) {
-        let plugin_rx = self.plugin_rx.lock().take().unwrap();
+        let plugin_rx = self.plugin_rx.lock().unwrap().take().unwrap();
         for msg in plugin_rx {
             match msg {
                 PluginCatalogRpc::ServerRequest {

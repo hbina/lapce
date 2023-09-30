@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use alacritty_terminal::{
     ansi,
@@ -22,7 +22,6 @@ use lapce_core::{
     register::Clipboard,
 };
 use lapce_rpc::terminal::TermId;
-use parking_lot::Mutex;
 
 use crate::{
     command::{
@@ -302,7 +301,7 @@ impl LapceTerminalViewData {
             _ => (),
         }
 
-        let mut raw = self.terminal.raw.lock();
+        let mut raw = self.terminal.raw.lock().unwrap();
         let term = &mut raw.term;
         if !term.mode().contains(TermMode::VI) {
             term.toggle_vi_mode();
@@ -330,7 +329,12 @@ impl LapceTerminalViewData {
                 .proxy
                 .proxy_rpc
                 .terminal_write(self.terminal.term_id, command.as_ref());
-            self.terminal.raw.lock().term.scroll_display(Scroll::Bottom);
+            self.terminal
+                .raw
+                .lock()
+                .unwrap()
+                .term
+                .scroll_display(Scroll::Bottom);
         }
     }
 }
@@ -357,7 +361,7 @@ impl KeyPressFocus for LapceTerminalViewData {
         match &command.kind {
             CommandKind::Move(cmd) => {
                 let movement = cmd.to_movement(count);
-                let mut raw = self.terminal.raw.lock();
+                let mut raw = self.terminal.raw.lock().unwrap();
                 let term = &mut raw.term;
                 match movement {
                     Movement::Left => {
@@ -413,7 +417,7 @@ impl KeyPressFocus for LapceTerminalViewData {
                         return CommandExecuted::Yes;
                     }
                     self.terminal_mut().mode = Mode::Normal;
-                    let mut raw = self.terminal.raw.lock();
+                    let mut raw = self.terminal.raw.lock().unwrap();
                     let term = &mut raw.term;
                     if !term.mode().contains(TermMode::VI) {
                         term.toggle_vi_mode();
@@ -431,7 +435,7 @@ impl KeyPressFocus for LapceTerminalViewData {
                 }
                 EditCommand::InsertMode => {
                     self.terminal_mut().mode = Mode::Terminal;
-                    let mut raw = self.terminal.raw.lock();
+                    let mut raw = self.terminal.raw.lock().unwrap();
                     let term = &mut raw.term;
                     if term.mode().contains(TermMode::VI) {
                         term.toggle_vi_mode();
@@ -444,7 +448,7 @@ impl KeyPressFocus for LapceTerminalViewData {
                     if self.terminal.mode == Mode::Visual {
                         self.terminal_mut().mode = Mode::Normal;
                     }
-                    let mut raw = self.terminal.raw.lock();
+                    let mut raw = self.terminal.raw.lock().unwrap();
                     let term = &mut raw.term;
                     if let Some(content) = term.selection_to_string() {
                         clipboard.put_string(content);
@@ -456,7 +460,7 @@ impl KeyPressFocus for LapceTerminalViewData {
                 EditCommand::ClipboardPaste => {
                     let mut check_bracketed_paste: bool = false;
                     if self.terminal.mode == Mode::Terminal {
-                        let mut raw = self.terminal.raw.lock();
+                        let mut raw = self.terminal.raw.lock().unwrap();
                         let term = &mut raw.term;
                         self.terminal.clear_selection(term);
                         if term.mode().contains(TermMode::BRACKETED_PASTE) {
@@ -477,7 +481,7 @@ impl KeyPressFocus for LapceTerminalViewData {
             },
             CommandKind::Focus(cmd) => match cmd {
                 FocusCommand::PageUp => {
-                    let mut raw = self.terminal.raw.lock();
+                    let mut raw = self.terminal.raw.lock().unwrap();
                     let term = &mut raw.term;
                     let scroll_lines = term.screen_lines() as i32 / 2;
                     term.vi_mode_cursor =
@@ -488,7 +492,7 @@ impl KeyPressFocus for LapceTerminalViewData {
                     ));
                 }
                 FocusCommand::PageDown => {
-                    let mut raw = self.terminal.raw.lock();
+                    let mut raw = self.terminal.raw.lock().unwrap();
                     let term = &mut raw.term;
                     let scroll_lines = -(term.screen_lines() as i32 / 2);
                     term.vi_mode_cursor =
@@ -534,7 +538,7 @@ impl KeyPressFocus for LapceTerminalViewData {
                 }
                 FocusCommand::SearchForward => {
                     if let Some(search_string) = self.find.search_string.as_ref() {
-                        let mut raw = self.terminal.raw.lock();
+                        let mut raw = self.terminal.raw.lock().unwrap();
                         let term = &mut raw.term;
                         self.terminal.search_next(
                             term,
@@ -545,7 +549,7 @@ impl KeyPressFocus for LapceTerminalViewData {
                 }
                 FocusCommand::SearchBackward => {
                     if let Some(search_string) = self.find.search_string.as_ref() {
-                        let mut raw = self.terminal.raw.lock();
+                        let mut raw = self.terminal.raw.lock().unwrap();
                         let term = &mut raw.term;
                         self.terminal.search_next(
                             term,
@@ -567,7 +571,12 @@ impl KeyPressFocus for LapceTerminalViewData {
                 .proxy
                 .proxy_rpc
                 .terminal_write(self.terminal.term_id, c);
-            self.terminal.raw.lock().term.scroll_display(Scroll::Bottom);
+            self.terminal
+                .raw
+                .lock()
+                .unwrap()
+                .term
+                .scroll_display(Scroll::Bottom);
         }
     }
 }
@@ -680,13 +689,13 @@ impl LapceTerminalData {
         let proxy = self.proxy.clone();
         let term_id = self.term_id;
         std::thread::spawn(move || {
-            raw.lock().term.resize(size);
+            raw.lock().unwrap().term.resize(size);
             proxy.proxy_rpc.terminal_resize(term_id, width, height);
         });
     }
 
     pub fn wheel_scroll(&self, delta: f64) {
-        let mut raw = self.raw.lock();
+        let mut raw = self.raw.lock().unwrap();
         let step = 25.0;
         raw.scroll_delta -= delta;
         let delta = (raw.scroll_delta / step) as i32;

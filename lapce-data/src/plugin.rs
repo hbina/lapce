@@ -1,6 +1,10 @@
 pub mod plugin_install_status;
 
-use std::{collections::HashSet, str::FromStr, sync::Arc};
+use std::{
+    collections::HashSet,
+    str::FromStr,
+    sync::{Arc, Mutex},
+};
 
 use anyhow::Result;
 use druid::{
@@ -11,7 +15,6 @@ use indexmap::IndexMap;
 use lapce_core::directory::Directory;
 use lapce_proxy::plugin::{download_volt, volt_icon, wasi::find_all_volts};
 use lapce_rpc::plugin::{VoltID, VoltInfo, VoltMetadata};
-use parking_lot::Mutex;
 use plugin_install_status::PluginInstallStatus;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -94,7 +97,7 @@ impl VoltsList {
             return;
         }
 
-        let mut loading = self.loading.lock();
+        let mut loading = self.loading.lock().unwrap();
         if *loading {
             return;
         }
@@ -127,7 +130,7 @@ impl VoltsList {
             self.volts.insert(v.id(), v.clone());
         }
         self.status = PluginLoadStatus::Success;
-        *self.loading.lock() = false;
+        *self.loading.lock().unwrap() = false;
     }
 
     pub fn failed(&mut self) {
@@ -315,7 +318,7 @@ impl PluginData {
                     );
                 }
                 if let Some(loading) = loading.as_ref() {
-                    *loading.lock() = false;
+                    *loading.lock().unwrap() = false;
                 }
             }
         }

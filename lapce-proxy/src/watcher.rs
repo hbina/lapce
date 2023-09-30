@@ -1,7 +1,7 @@
 use std::{
     collections::VecDeque,
     path::{Path, PathBuf},
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use crossbeam_channel::{unbounded, Receiver};
@@ -10,7 +10,6 @@ use notify::{
     recommended_watcher, Event, EventKind, RecommendedWatcher, RecursiveMode,
     Watcher,
 };
-use parking_lot::Mutex;
 
 /// Wrapper around a `notify::Watcher`. It runs the inner watcher
 /// in a separate thread, and communicates with it via a [crossbeam channel].
@@ -77,7 +76,7 @@ impl FileWatcher {
             while let Ok(Ok(event)) = rx_event.recv() {
                 let mut events = Vec::new();
                 {
-                    let mut state = state.lock();
+                    let mut state = state.lock().unwrap();
                     let WatcherState {
                         ref mut watchees, ..
                     } = *state;
@@ -134,7 +133,7 @@ impl FileWatcher {
             }
         };
 
-        let mut state = self.state.lock();
+        let mut state = self.state.lock().unwrap();
 
         let w = Watchee {
             path,
@@ -155,7 +154,7 @@ impl FileWatcher {
     /// Does not stop watching this path, if it is associated with
     /// other tokens.
     pub fn unwatch(&mut self, path: &Path, token: WatchToken) {
-        let mut state = self.state.lock();
+        let mut state = self.state.lock().unwrap();
 
         let idx = state
             .watchees
@@ -197,7 +196,7 @@ impl FileWatcher {
 
     /// Takes ownership of this `Watcher`'s current event queue.
     pub fn take_events(&self) -> VecDeque<(WatchToken, Event)> {
-        let mut state = self.state.lock();
+        let mut state = self.state.lock().unwrap();
         let WatcherState { ref mut events, .. } = *state;
         std::mem::take(events)
     }

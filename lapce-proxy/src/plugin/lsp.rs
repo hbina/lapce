@@ -4,7 +4,7 @@ use std::{
     io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
     process::{self, Child, Command, Stdio},
-    sync::Arc,
+    sync::{Arc, Mutex},
     thread,
 };
 
@@ -15,7 +15,6 @@ use lapce_core::meta;
 use lapce_rpc::plugin::VoltID;
 use lapce_rpc::{style::LineStyle, RpcError};
 use lapce_xi_rope::Rope;
-use parking_lot::Mutex;
 use psp_types::lsp_types::{
     notification::{Initialized, Notification},
     request::{Initialize, Request},

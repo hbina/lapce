@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     thread,
     time::Duration,
@@ -31,7 +31,6 @@ use lapce_rpc::{
     RequestId, RpcError,
 };
 use lapce_xi_rope::Rope;
-use parking_lot::Mutex;
 use psp_types::lsp_types::{Position, Range, TextDocumentItem, Url};
 
 use crate::{
@@ -882,7 +881,7 @@ impl FileWatchNotifier {
             thread::spawn(move || {
                 if let Some(diff) = git_diff_new(&workspace) {
                     core_rpc.diff_info(diff.clone());
-                    *last_diff.lock() = diff;
+                    *last_diff.lock().unwrap() = diff;
                 }
             });
         }
@@ -918,7 +917,7 @@ impl FileWatchNotifier {
             _ => return,
         };
 
-        let mut handler = self.workspace_fs_change_handler.lock();
+        let mut handler = self.workspace_fs_change_handler.lock().unwrap();
         if let Some(sender) = handler.as_mut() {
             if explorer_change {
                 // only send the value if we need to update file explorer as well
@@ -940,7 +939,7 @@ impl FileWatchNotifier {
             thread::sleep(Duration::from_millis(500));
 
             {
-                local_handler.lock().take();
+                local_handler.lock().unwrap().take();
             }
 
             let mut explorer_change = false;
@@ -954,7 +953,7 @@ impl FileWatchNotifier {
                 core_rpc.workspace_file_change();
             }
             if let Some(diff) = git_diff_new(&workspace) {
-                let mut last_diff = last_diff.lock();
+                let mut last_diff = last_diff.lock().unwrap();
                 if diff != *last_diff {
                     core_rpc.diff_info(diff.clone());
                     *last_diff = diff;

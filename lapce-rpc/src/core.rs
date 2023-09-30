@@ -3,12 +3,11 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
 use crossbeam_channel::{Receiver, Sender};
-use parking_lot::Mutex;
 use psp_types::lsp_types::{
     CompletionResponse, LogMessageParams, ProgressParams, PublishDiagnosticsParams,
     ShowMessageParams, SignatureHelp,
@@ -177,7 +176,7 @@ impl CoreRpcHandler {
         id: RequestId,
         response: Result<CoreResponse, RpcError>,
     ) {
-        let tx = { self.pending.lock().remove(&id) };
+        let tx = { self.pending.lock().unwrap().remove(&id) };
         if let Some(tx) = tx {
             let _ = tx.send(response);
         }
@@ -187,7 +186,7 @@ impl CoreRpcHandler {
         let (tx, rx) = crossbeam_channel::bounded(1);
         let id = self.id.fetch_add(1, Ordering::Relaxed);
         {
-            let mut pending = self.pending.lock();
+            let mut pending = self.pending.lock().unwrap();
             pending.insert(id, tx);
         }
         let _ = self.tx.send(CoreRpc::Request(id, request));

@@ -1583,7 +1583,7 @@ impl LapceTab {
                     }
                     LapceUICommand::TerminalJumpToLine(line) => {
                         if let Some(terminal) = data.terminal.active_terminal() {
-                            terminal.raw.lock().term.vi_goto_point(
+                            terminal.raw.lock().unwrap().term.vi_goto_point(
                                 alacritty_terminal::index::Point::new(
                                     alacritty_terminal::index::Line(*line),
                                     alacritty_terminal::index::Column(0),

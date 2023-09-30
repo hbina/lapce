@@ -1532,12 +1532,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fixedbitset"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37ab347416e802de484e4d03c7316c48f1ecb56574dfd4a46a80f173ce1de04d"
-
-[[package]]
 name = "flate2"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3034,7 +3028,6 @@ dependencies = [
  "log",
  "notify",
  "once_cell",
- "parking_lot 0.11.2",
  "psp-types",
  "pulldown-cmark",
  "rayon",
@@ -3087,7 +3080,6 @@ dependencies = [
  "notify",
  "objc",
  "once_cell",
- "parking_lot 0.11.2",
  "psp-types",
  "regex",
  "reqwest",
@@ -3118,7 +3110,6 @@ dependencies = [
  "indexmap 1.9.3",
  "lapce-xi-rope",
  "log",
- "parking_lot 0.11.2",
  "psp-types",
  "serde",
  "serde_json",
@@ -3996,14 +3987,11 @@ version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60a2cfe6f0ad2bfc16aefa463b497d5c7a5ecd44a23efa72aa342d90177356dc"
 dependencies = [
- "backtrace",
  "cfg-if 1.0.0",
  "instant",
  "libc",
- "petgraph",
  "redox_syscall 0.2.16",
  "smallvec",
- "thread-id",
  "winapi 0.3.9",
 ]
 
@@ -4064,16 +4052,6 @@ name = "percent-encoding"
 version = "2.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9b2a4787296e9989611394c33f193f676704af1686e70b8f8033ab5ba9a35a94"
-
-[[package]]
-name = "petgraph"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "467d164a6de56270bd7c4d070df81d07beace25012d5103ced4e9ff08d6afdb7"
-dependencies = [
- "fixedbitset",
- "indexmap 1.9.3",
-]
 
 [[package]]
 name = "pico-args"
@@ -5178,17 +5156,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.37",
-]
-
-[[package]]
-name = "thread-id"
-version = "4.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79474f573561cdc4871a0de34a51c92f7f5a56039113fbb5b9c9f96bdb756669"
-dependencies = [
- "libc",
- "redox_syscall 0.2.16",
- "winapi 0.3.9",
 ]
 
 [[package]]

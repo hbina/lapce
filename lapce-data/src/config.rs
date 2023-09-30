@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     path::{Path, PathBuf},
-    sync::{atomic::AtomicBool, Arc},
+    sync::{atomic::AtomicBool, Arc, Mutex, RwLock},
 };
 
 use druid::{
@@ -13,7 +13,6 @@ use lapce_core::directory::Directory;
 use lapce_proxy::plugin::wasi::find_all_volts;
 use lapce_rpc::plugin::VoltID;
 use once_cell::sync::Lazy;
-use parking_lot::RwLock;
 use psp_types::lsp_types::{CompletionItemKind, SymbolKind};
 use serde::{Deserialize, Serialize};
 use structdesc::FieldNames;
@@ -1744,7 +1743,7 @@ impl LapceConfig {
         font_size: usize,
     ) -> f64 {
         {
-            let info = self.tab_layout_info.read();
+            let info = self.tab_layout_info.read().unwrap();
             if let Some(width) = info.get(&(font_family.clone(), font_size)) {
                 return self.editor.tab_width as f64 * *width;
             };
@@ -1761,23 +1760,24 @@ impl LapceConfig {
 
         self.tab_layout_info
             .write()
+            .unwrap()
             .insert((font_family, font_size), width);
         self.editor.tab_width as f64 * width
     }
 
     pub fn logo_svg(&self) -> Svg {
-        self.svg_store.read().logo_svg()
+        self.svg_store.read().unwrap().logo_svg()
     }
 
     pub fn ui_svg(&self, icon: &'static str) -> Svg {
         let svg = self.icon_theme.ui.get(icon).and_then(|path| {
             let path = self.icon_theme.path.join(path);
-            self.svg_store.write().get_svg_on_disk(&path)
+            self.svg_store.write().unwrap().get_svg_on_disk(&path)
         });
 
         svg.unwrap_or_else(|| {
             let name = self.default_icon_theme.ui.get(icon).unwrap();
-            self.svg_store.write().get_default_svg(name)
+            self.svg_store.write().unwrap().get_default_svg(name)
         })
     }
 
@@ -1792,7 +1792,7 @@ impl LapceConfig {
             )
             .and_then(|(_, path)| {
                 let path = self.icon_theme.path.join(path);
-                self.svg_store.write().get_svg_on_disk(&path)
+                self.svg_store.write().unwrap().get_svg_on_disk(&path)
             })
             .map(|svg| {
                 let color = if self.icon_theme.use_editor_color.unwrap_or(false) {
@@ -1808,7 +1808,7 @@ impl LapceConfig {
         let svg = self
             .icon_theme
             .resolve_path_to_icon(path)
-            .and_then(|p| self.svg_store.write().get_svg_on_disk(&p));
+            .and_then(|p| self.svg_store.write().unwrap().get_svg_on_disk(&p));
         if let Some(svg) = svg {
             let color = if self.icon_theme.use_editor_color.unwrap_or(false) {
                 Some(self.get_color_unchecked(LapceTheme::LAPCE_ICON_ACTIVE))

@@ -3,7 +3,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, Mutex,
     },
 };
 
@@ -11,7 +11,6 @@ use super::plugin::VoltID;
 use crossbeam_channel::{Receiver, Sender};
 use indexmap::IndexMap;
 use lapce_xi_rope::RopeDelta;
-use parking_lot::Mutex;
 use psp_types::lsp_types::{
     request::GotoTypeDefinitionResponse, CodeAction, CodeActionResponse,
     CompletionItem, Diagnostic, DocumentSymbolResponse, GotoDefinitionResponse,
@@ -397,7 +396,7 @@ impl ProxyRpcHandler {
     fn request_common(&self, request: ProxyRequest, rh: ResponseHandler) {
         let id = self.id.fetch_add(1, Ordering::Relaxed);
 
-        self.pending.lock().insert(id, rh);
+        self.pending.lock().unwrap().insert(id, rh);
 
         let _ = self.tx.send(ProxyRpc::Request(id, request));
     }
@@ -426,7 +425,7 @@ impl ProxyRpcHandler {
         id: RequestId,
         result: Result<ProxyResponse, RpcError>,
     ) {
-        let handler = { self.pending.lock().remove(&id) };
+        let handler = { self.pending.lock().unwrap().remove(&id) };
         if let Some(handler) = handler {
             handler.invoke(result);
         }
