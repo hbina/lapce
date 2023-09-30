@@ -8,11 +8,11 @@ use std::{
 };
 
 use crossbeam_channel::{Receiver, Sender};
+use parking_lot::Mutex;
 use psp_types::lsp_types::{
     CompletionResponse, LogMessageParams, ProgressParams, PublishDiagnosticsParams,
     ShowMessageParams, SignatureHelp,
 };
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::{

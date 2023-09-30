@@ -11,13 +11,13 @@ use super::plugin::VoltID;
 use crossbeam_channel::{Receiver, Sender};
 use indexmap::IndexMap;
 use lapce_xi_rope::RopeDelta;
+use parking_lot::Mutex;
 use psp_types::lsp_types::{
     request::GotoTypeDefinitionResponse, CodeAction, CodeActionResponse,
     CompletionItem, Diagnostic, DocumentSymbolResponse, GotoDefinitionResponse,
     Hover, InlayHint, Location, Position, PrepareRenameResponse, SelectionRange,
     SymbolInformation, TextDocumentItem, TextEdit, WorkspaceEdit,
 };
-use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
 use crate::{

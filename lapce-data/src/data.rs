@@ -40,8 +40,10 @@ use lapce_rpc::{
     terminal::TermId,
 };
 use lapce_xi_rope::{Rope, RopeDelta};
-use psp_types::lsp_types::{Diagnostic, DiagnosticSeverity, Position, ProgressToken, TextEdit};
 use notify::Watcher;
+use psp_types::lsp_types::{
+    Diagnostic, DiagnosticSeverity, Position, ProgressToken, TextEdit,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 

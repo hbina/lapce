@@ -25,8 +25,8 @@ use lapce_rpc::{
     RequestId, RpcMessage,
 };
 use lapce_xi_rope::Rope;
-use psp_types::lsp_types::{LogMessageParams, MessageType, Url};
 use parking_lot::Mutex;
+use psp_types::lsp_types::{LogMessageParams, MessageType, Url};
 use serde_json::Value;
 use thiserror::Error;
 

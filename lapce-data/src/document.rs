@@ -591,7 +591,9 @@ impl Document {
 
     /// Update the diagnostics' positions after an edit so that they appear in the correct place.
     fn update_diagnostics(&mut self, delta: &RopeDelta) {
-        let Some(mut diagnostics) = self.diagnostics.clone() else { return };
+        let Some(mut diagnostics) = self.diagnostics.clone() else {
+            return;
+        };
 
         for diagnostic in Arc::make_mut(&mut diagnostics).iter_mut() {
             let mut transformer = Transformer::new(delta);
@@ -634,7 +636,9 @@ impl Document {
 
     /// Update the completion lens position after an edit so that it appears in the correct place.
     fn update_completion(&mut self, delta: &RopeDelta) {
-        let Some(completion) = self.completion.clone() else { return };
+        let Some(completion) = self.completion.clone() else {
+            return;
+        };
 
         let (line, col) = self.completion_pos;
         let offset = self.buffer().offset_of_line_col(line, col);
@@ -1102,7 +1106,9 @@ impl Document {
         &mut self,
         edits: Option<SmallVec<[SyntaxEdit; 3]>>,
     ) {
-        let Some(syntax)  = self.syntax.as_mut() else { return };
+        let Some(syntax) = self.syntax.as_mut() else {
+            return;
+        };
 
         let rev = self.buffer.rev();
         let text = self.buffer.text().clone();
