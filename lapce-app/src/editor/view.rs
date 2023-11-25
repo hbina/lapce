@@ -1233,7 +1233,16 @@ impl EditorView {
 
             let bracket_offsets = view
                 .doc
-                .with_untracked(|doc| doc.find_enclosing_brackets(offset))
+                .with_untracked(|doc| {
+                    let begin_offset = screen_lines.lines.first().map(|s| {
+                        doc.buffer.get_untracked().text().offset_of_line(*s)
+                    });
+                    let end_offset = screen_lines.lines.last().map(|s| {
+                        doc.buffer.get_untracked().text().offset_of_line(*s)
+                    });
+
+                    doc.find_enclosing_brackets(offset, begin_offset, end_offset)
+                })
                 .map(|(start, end)| [start, end]);
 
             let bracket_line_cols = bracket_offsets.map(|bracket_offsets| {

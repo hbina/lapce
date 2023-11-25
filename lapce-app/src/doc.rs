@@ -29,7 +29,7 @@ use lapce_core::{
     selection::{InsertDrift, Selection},
     style::line_styles,
     syntax::{edit::SyntaxEdit, Syntax},
-    word::WordCursor,
+    word::{PairFinder, WordCursor},
 };
 use lapce_rpc::{
     buffer::BufferId,
@@ -1598,7 +1598,12 @@ impl Document {
     /// Returns the offsets of the brackets enclosing the given offset.
     /// Uses a language aware algorithm if syntax support is available for the current language,
     /// else falls back to a language unaware algorithm.
-    pub fn find_enclosing_brackets(&self, offset: usize) -> Option<(usize, usize)> {
+    pub fn find_enclosing_brackets(
+        &self,
+        offset: usize,
+        begin_offset: Option<usize>,
+        end_offset: Option<usize>,
+    ) -> Option<(usize, usize)> {
         self.syntax
             .with_untracked(|syntax| {
                 (!syntax.text.is_empty()).then(|| syntax.find_enclosing_pair(offset))
@@ -1608,7 +1613,12 @@ impl Document {
             // Try a language unaware search for enclosing brackets in case it is the latter.
             .unwrap_or_else(|| {
                 self.buffer.with_untracked(|buffer| {
-                    WordCursor::new(buffer.text(), offset).find_enclosing_pair()
+                    PairFinder::find_enclosing_pair(
+                        buffer.text(),
+                        offset,
+                        begin_offset,
+                        end_offset,
+                    )
                 })
             })
     }
