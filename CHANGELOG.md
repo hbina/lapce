@@ -67,6 +67,7 @@
 - [#2127](https://github.com/lapce/lapce/pull/2127): Extended double-click options with file-only and file + folders mode
 - [#1944](https://github.com/lapce/lapce/pull/1944): Add filter input in git branch selection
   - ![image](https://user-images.githubusercontent.com/4404609/211232461-293e3b31-4e17-457e-825c-3018699a6fc2.png)
+- [#2126](https://github.com/lapce/lapce/pull/2126) Reflect diagnostic issues in the file explorer
 
 ### Bug Fixes
 - [#1911](https://github.com/lapce/lapce/pull/1911): Fix movement on selections with left/right arrow keys
