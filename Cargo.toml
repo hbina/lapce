@@ -120,7 +120,7 @@ codegen-units = 1
 # To use this profile:
 #   cargo build --profile fastdev
 #   cargo run --profile fastdev --bin lapce
-[profile.fastdev.package."*"]
+[profile.dev.package."*"]
 opt-level = 3
 
 [profile.fastdev]
