@@ -1,13 +1,12 @@
-use std::{collections::HashMap, path::PathBuf, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
 use alacritty_terminal::{
     Term,
     grid::{Dimensions, Scroll},
     selection::{Selection, SelectionType},
-    term::{TermMode, test::TermSize},
+    term::TermMode,
     vi_mode::ViMotion,
 };
-use anyhow::anyhow;
 use floem::{
     keyboard::{Key, KeyEvent, Modifiers, NamedKey},
     reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith},
@@ -19,12 +18,8 @@ use lapce_core::{
     movement::{LinePosition, Movement},
     register::Clipboard,
 };
-use lapce_rpc::{
-    dap_types::RunDebugConfig,
-    terminal::{TermId, TerminalProfile},
-};
+use lapce_rpc::terminal::{TermId, TerminalProfile};
 use parking_lot::RwLock;
-use url::Url;
 
 use super::{
     event::TermEvent,
@@ -32,7 +27,6 @@ use super::{
 };
 use crate::{
     command::{CommandExecuted, CommandKind, InternalCommand},
-    debug::{RunDebugMode, RunDebugProcess},
     keypress::{KeyPressFocus, condition::Condition},
     window_tab::CommonData,
     workspace::LapceWorkspace,
@@ -44,11 +38,15 @@ pub struct TerminalData {
     pub term_id: TermId,
     pub workspace: Arc<LapceWorkspace>,
     pub title: RwSignal<String>,
-    pub launch_error: RwSignal<Option<String>>,
+    pub launch_error: crate::reactive_model::ModelField<
+        lapce_engine::terminal::TerminalState,
+        Option<String>,
+    >,
+    lifecycle: RwSignal<lapce_engine::terminal::TerminalState>,
+    lifecycle_changed: RwSignal<()>,
     pub mode: RwSignal<Mode>,
     pub visual_mode: RwSignal<VisualMode>,
     pub raw: RwSignal<Arc<RwLock<RawTerminal>>>,
-    pub run_debug: RwSignal<Option<RunDebugProcess>>,
     pub common: Rc<CommonData>,
 }
 
@@ -291,9 +289,13 @@ impl KeyPressFocus for TerminalData {
 
     fn receive_char(&self, c: &str) {
         if self.mode.get_untracked() == Mode::Terminal {
-            self.common
-                .proxy
-                .terminal_write(self.term_id, c.to_string());
+            let effect = self
+                .lifecycle
+                .with_untracked(|state| state.input(self.term_id, c.into()));
+            let Ok(Some(effect)) = effect else {
+                return;
+            };
+            self.common.proxy.notification(effect);
             self.raw
                 .get_untracked()
                 .write()
@@ -310,16 +312,6 @@ impl TerminalData {
         profile: Option<TerminalProfile>,
         common: Rc<CommonData>,
     ) -> Self {
-        Self::new_run_debug(cx, workspace, None, profile, common)
-    }
-
-    pub fn new_run_debug(
-        cx: Scope,
-        workspace: Arc<LapceWorkspace>,
-        run_debug: Option<RunDebugProcess>,
-        profile: Option<TerminalProfile>,
-        common: Rc<CommonData>,
-    ) -> Self {
         let cx = cx.create_child();
         let term_id = TermId::next();
 
@@ -329,18 +321,24 @@ impl TerminalData {
             cx.create_rw_signal(String::from("Default"))
         };
 
-        let launch_error = cx.create_rw_signal(None);
-
-        let raw = Self::new_raw_terminal(
-            &workspace,
-            term_id,
-            run_debug.as_ref(),
-            profile,
-            common.clone(),
-            launch_error,
+        let lifecycle =
+            cx.create_rw_signal(lapce_engine::terminal::TerminalState::default());
+        let lifecycle_changed = cx.create_rw_signal(());
+        let launch_error = crate::reactive_model::ModelField::new(
+            lifecycle,
+            lifecycle_changed,
+            |state| &state.launch_error,
+            |state| &mut state.launch_error,
+            Some(|state| {
+                if let Some(error) = state.launch_error.clone() {
+                    state.failed(error);
+                }
+            }),
         );
 
-        let run_debug = cx.create_rw_signal(run_debug);
+        let raw =
+            Self::new_raw_terminal(&workspace, term_id, profile, common.clone());
+
         let mode = cx.create_rw_signal(Mode::Terminal);
         let visual_mode = cx.create_rw_signal(VisualMode::Normal);
         let raw = cx.create_rw_signal(raw);
@@ -351,21 +349,20 @@ impl TerminalData {
             workspace,
             raw,
             title,
-            run_debug,
             mode,
             visual_mode,
             common,
             launch_error,
+            lifecycle,
+            lifecycle_changed,
         }
     }
 
     fn new_raw_terminal(
         workspace: &LapceWorkspace,
         term_id: TermId,
-        run_debug: Option<&RunDebugProcess>,
         profile: Option<TerminalProfile>,
         common: Rc<CommonData>,
-        launch_error: RwSignal<Option<String>>,
     ) -> Arc<RwLock<RawTerminal>> {
         let raw = Arc::new(RwLock::new(RawTerminal::new(
             term_id,
@@ -380,39 +377,6 @@ impl TerminalData {
                 workspace.path.as_ref().cloned().unwrap_or_default(),
             )
             .ok();
-        }
-
-        let exp_run_debug = run_debug
-            .as_ref()
-            .map(|run_debug| {
-                ExpandedRunDebug::expand(
-                    workspace,
-                    &run_debug.config,
-                    run_debug.is_prelaunch,
-                )
-            })
-            .transpose();
-
-        let exp_run_debug = exp_run_debug.unwrap_or_else(|e| {
-            let r_name = run_debug
-                .as_ref()
-                .map(|r| r.config.name.as_str())
-                .unwrap_or("Unknown");
-            launch_error.set(Some(format!(
-                "Failed to expand variables in run debug definition {r_name}: {e}"
-            )));
-            None
-        });
-
-        if let Some(run_debug) = exp_run_debug {
-            if let Some(work_dir) = run_debug.work_dir {
-                profile.workdir = Some(work_dir);
-            }
-
-            profile.environment = run_debug.env;
-
-            profile.command = Some(run_debug.program);
-            profile.arguments = run_debug.args;
         }
 
         {
@@ -716,146 +680,36 @@ impl TerminalData {
         term.selection = Some(Selection::new(ty, point, side));
     }
 
-    pub fn new_process(&self, run_debug: Option<RunDebugProcess>) {
-        let (width, height) = {
-            let raw = self.raw.get_untracked();
-            let raw = raw.read();
-            let width = raw.term.columns();
-            let height = raw.term.screen_lines();
-            (width, height)
-        };
-
-        let raw = Self::new_raw_terminal(
-            &self.workspace,
-            self.term_id,
-            run_debug.as_ref(),
-            None,
-            self.common.clone(),
-            self.launch_error,
-        );
-
-        self.raw.set(raw);
-        self.run_debug.set(run_debug);
-
-        let term_size = TermSize::new(width, height);
-        self.raw.get_untracked().write().term.resize(term_size);
-        self.common
-            .proxy
-            .terminal_resize(self.term_id, width, height);
+    pub fn observe_process_id(&self, process_id: Option<u32>) -> bool {
+        let accepted = self
+            .lifecycle
+            .try_update(|state| state.started(process_id))
+            .unwrap_or(false);
+        if accepted {
+            self.lifecycle_changed.set(());
+        }
+        accepted
     }
-
+    pub fn observe_exit(&self, exit_code: Option<i32>) -> bool {
+        let accepted = self
+            .lifecycle
+            .try_update(|state| state.stopped(exit_code))
+            .unwrap_or(false);
+        if accepted {
+            self.lifecycle_changed.set(());
+        }
+        accepted
+    }
+    pub fn observe_failure(&self, error: &str) {
+        if self
+            .lifecycle
+            .try_update(|state| state.failed(error.into()))
+            .unwrap_or(false)
+        {
+            self.lifecycle_changed.set(());
+        }
+    }
     pub fn stop(&self) {
-        if let Some(dap_id) = self.run_debug.with_untracked(|x| {
-            if let Some(process) = x {
-                if !process.is_prelaunch && process.mode == RunDebugMode::Debug {
-                    return Some(process.config.dap_id);
-                }
-            }
-            None
-        }) {
-            self.common.proxy.dap_stop(dap_id);
-        }
         self.common.proxy.terminal_close(self.term_id);
-    }
-}
-
-/// [`RunDebugConfig`] with expanded out program/arguments/etc. Used for creating the terminal.
-#[derive(Debug, Clone)]
-pub struct ExpandedRunDebug {
-    pub work_dir: Option<Url>,
-    pub env: Option<HashMap<String, String>>,
-    pub program: String,
-    pub args: Option<Vec<String>>,
-}
-impl ExpandedRunDebug {
-    pub fn expand(
-        workspace: &LapceWorkspace,
-        run_debug: &RunDebugConfig,
-        is_prelaunch: bool,
-    ) -> anyhow::Result<Self> {
-        // Get the current working directory variable, which can container ${workspace}
-        let work_dir = Self::expand_work_dir(workspace, run_debug);
-
-        let prelaunch = is_prelaunch
-            .then_some(run_debug.prelaunch.as_ref())
-            .flatten();
-
-        let env = run_debug.env.clone();
-
-        // TODO: replace some variables in the args
-        let (program, mut args) =
-            if let Some(debug_command) = run_debug.debug_command.as_ref() {
-                let mut args = debug_command.to_owned();
-                let command = args.first().cloned().unwrap_or_default();
-                if !args.is_empty() {
-                    args.remove(0);
-                }
-
-                let args = if !args.is_empty() { Some(args) } else { None };
-                (command, args)
-            } else if let Some(prelaunch) = prelaunch {
-                (prelaunch.program.clone(), prelaunch.args.clone())
-            } else {
-                (run_debug.program.clone(), run_debug.args.clone())
-            };
-        let mut program = if program == "${lapce}" {
-            std::env::current_exe()
-                .map_err(|e| {
-                    anyhow!(
-                        "Failed to get current exe for ${{lapce}} run and debug: {e}"
-                    )
-                })?
-                .to_str()
-                .ok_or_else(|| anyhow!("Failed to convert ${{lapce}} path to str"))?
-                .to_string()
-        } else {
-            program
-        };
-
-        if program.contains("${workspace}") {
-            if let Some(workspace) = workspace.path.as_ref().and_then(|x| x.to_str())
-            {
-                program = program.replace("${workspace}", workspace);
-            }
-        }
-
-        if let Some(args) = &mut args {
-            for arg in args {
-                // Replace all mentions of ${workspace} with the current workspace path
-                if arg.contains("${workspace}") {
-                    if let Some(workspace) =
-                        workspace.path.as_ref().and_then(|x| x.to_str())
-                    {
-                        *arg = arg.replace("${workspace}", workspace);
-                    }
-                }
-            }
-        }
-
-        Ok(ExpandedRunDebug {
-            work_dir,
-            env,
-            program,
-            args,
-        })
-    }
-
-    fn expand_work_dir(
-        workspace: &LapceWorkspace,
-        run_debug: &RunDebugConfig,
-    ) -> Option<Url> {
-        let path = run_debug.cwd.as_ref()?;
-
-        if path.contains("${workspace}") {
-            if let Some(workspace) = workspace.path.as_ref().and_then(|x| x.to_str())
-            {
-                let path = path.replace("${workspace}", workspace);
-                if let Ok(as_url) = Url::from_file_path(PathBuf::from(path)) {
-                    return Some(as_url);
-                }
-            }
-        }
-
-        Url::from_file_path(PathBuf::from(path)).ok()
     }
 }

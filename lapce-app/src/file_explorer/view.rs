@@ -1,4 +1,5 @@
-use std::{path::Path, rc::Rc, sync::Arc};
+use super::model::{FileNodeViewData, FileNodeViewKind};
+use std::{rc::Rc, sync::Arc};
 
 use floem::{
     View,
@@ -8,19 +9,13 @@ use floem::{
     reactive::{
         ReadSignal, RwSignal, SignalGet, SignalUpdate, SignalWith, create_rw_signal,
     },
-    style::{AlignItems, CursorStyle, Position, Style},
+    style::{AlignItems, CursorStyle, Style},
     text::Style as FontStyle,
     views::{
-        Container, Decorators, container, dyn_stack, label, scroll, stack, svg,
-        virtual_stack,
+        Decorators, container, dyn_stack, label, scroll, stack, svg, virtual_stack,
     },
 };
-use lapce_core::selection::Selection;
-use lapce_rpc::{
-    file::{FileNodeViewData, FileNodeViewKind, Naming},
-    source_control::FileDiffKind,
-};
-use lapce_xi_rope::Rope;
+use lapce_rpc::source_control::FileDiffKind;
 
 use super::{data::FileExplorerData, node::FileNodeVirtualList};
 use crate::{
@@ -34,31 +29,8 @@ use crate::{
     },
     plugin::PluginData,
     source_control::SourceControlData,
-    text_input::TextInputBuilder,
     window_tab::{Focus, WindowTabData},
 };
-
-/// Blends `foreground` with `background`.
-///
-/// Uses the alpha channel from `foreground` - if `foreground` is opaque, `foreground` will be
-/// returned unchanged.
-///
-/// The result is always opaque regardless of the transparency of the inputs.
-fn blend_colors(background: Color, foreground: Color) -> Color {
-    let background = background.to_rgba8();
-    let foreground = foreground.to_rgba8();
-    let a: u16 = foreground.a.into();
-    let [r, g, b] = [
-        [background.r, foreground.r],
-        [background.g, foreground.g],
-        [background.b, foreground.b],
-    ]
-    .map(|x| x.map(u16::from))
-    .map(|[b, f]| (a * f + (255 - a) * b) / 255)
-    .map(|x| x as u8);
-
-    Color::from_rgba8(r, g, b, 255)
-}
 
 pub fn file_explorer_panel(
     window_tab_data: Rc<WindowTabData>,
@@ -88,50 +60,13 @@ pub fn file_explorer_panel(
         .debug_name("File Explorer Panel")
 }
 
-/// Initialize the file explorer's naming (renaming, creating, etc.) editor with the given path.
-fn initialize_naming_editor_with_path(data: &FileExplorerData, path: &Path) {
-    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-    // Start with the part of the file or directory name before the extension
-    // selected.
-    let selection_end = {
-        let without_leading_dot = file_name.strip_prefix('.').unwrap_or(&file_name);
-        let idx = without_leading_dot
-            .find('.')
-            .unwrap_or(without_leading_dot.len());
-
-        idx + file_name.len() - without_leading_dot.len()
-    };
-
-    initialize_naming_editor(data, &file_name, Some(selection_end));
-}
-
-fn initialize_naming_editor(
-    data: &FileExplorerData,
-    text: &str,
-    selection_end: Option<usize>,
-) {
-    let text = Rope::from(text);
-    let selection_end = selection_end.unwrap_or(text.len());
-
-    let doc = data.naming_editor_data.doc();
-    doc.reload(text, true);
-    data.naming_editor_data
-        .cursor()
-        .update(|cursor| cursor.set_insert(Selection::region(0, selection_end)));
-
-    data.naming
-        .update(|naming| naming.set_editor_needs_reset(false));
-}
-
 fn file_node_text_color(
     config: ReadSignal<Arc<LapceConfig>>,
     node: FileNodeViewData,
     source_control: SourceControlData,
 ) -> Color {
     let diff = source_control.file_diffs.with(|file_diffs| {
-        let FileNodeViewKind::Path(path) = &node.kind else {
-            return None;
-        };
+        let FileNodeViewKind::Path(path) = &node.kind;
 
         if node.is_dir {
             file_diffs
@@ -139,7 +74,7 @@ fn file_node_text_color(
                 .find(|p| p.as_path().starts_with(path))
                 .map(|_| FileDiffKind::Modified)
         } else {
-            file_diffs.get(path).map(|(diff, _)| diff.kind())
+            file_diffs.get(path).map(|diff| diff.kind())
         }
     });
 
@@ -214,94 +149,7 @@ fn file_node_text_view(
                 )
             }
         }
-        FileNodeViewKind::Renaming { path, err } => {
-            if data.naming.with_untracked(Naming::editor_needs_reset) {
-                initialize_naming_editor_with_path(&data, &path);
-            }
-
-            file_node_input_view(data, err.clone())
-        }
-        FileNodeViewKind::Naming { err } => {
-            if data.naming.with_untracked(Naming::editor_needs_reset) {
-                initialize_naming_editor(&data, "", None);
-            }
-
-            file_node_input_view(data, err.clone())
-        }
-        FileNodeViewKind::Duplicating { source, err } => {
-            if data.naming.with_untracked(Naming::editor_needs_reset) {
-                initialize_naming_editor_with_path(&data, &source);
-            }
-
-            file_node_input_view(data, err.clone())
-        }
     }
-}
-
-/// Input used for naming a file/directory
-fn file_node_input_view(data: FileExplorerData, err: Option<String>) -> Container {
-    let ui_line_height = data.common.ui_line_height;
-
-    let naming_editor_data = data.naming_editor_data.clone();
-    let text_input_file_explorer_data = data.clone();
-    let focus = data.common.focus;
-    let config = data.common.config;
-
-    let is_focused = move || {
-        focus.with_untracked(|focus| focus == &Focus::Panel(PanelKind::FileExplorer))
-    };
-    let text_input_view = TextInputBuilder::new()
-        .is_focused(is_focused)
-        .key_focus(text_input_file_explorer_data)
-        .build_editor(naming_editor_data.clone())
-        .on_event_stop(EventListener::FocusLost, move |_| {
-            data.finish_naming();
-            data.naming.set(Naming::None);
-        })
-        .style(move |s| {
-            s.width_full()
-                .height(ui_line_height.get())
-                .padding(0.0)
-                .margin(0.0)
-                .border_radius(6.0)
-                .border(1.0)
-                .border_color(config.get().color(LapceColor::LAPCE_BORDER))
-        });
-
-    let text_input_id = text_input_view.id();
-    text_input_id.request_focus();
-
-    if let Some(err) = err {
-        container(
-            stack((
-                text_input_view,
-                label(move || err.clone()).style(move |s| {
-                    let config = config.get();
-
-                    let editor_background_color =
-                        config.color(LapceColor::PANEL_CURRENT_BACKGROUND);
-                    let error_background_color =
-                        config.color(LapceColor::ERROR_LENS_ERROR_BACKGROUND);
-
-                    let background_color = blend_colors(
-                        editor_background_color,
-                        error_background_color,
-                    );
-
-                    s.position(Position::Absolute)
-                        .inset_top(ui_line_height.get())
-                        .width_full()
-                        .color(config.color(LapceColor::ERROR_LENS_ERROR_FOREGROUND))
-                        .background(background_color)
-                        .z_index(100)
-                }),
-            ))
-            .style(|s| s.flex_grow(1.0f32)),
-        )
-    } else {
-        container(text_input_view)
-    }
-    .style(move |s| s.width_full())
 }
 
 fn file_explorer_view(
@@ -311,7 +159,6 @@ fn file_explorer_view(
     let root = data.root;
     let ui_line_height = data.common.ui_line_height;
     let config = data.common.config;
-    let naming = data.naming;
     let scroll_to_line = data.scroll_to_line;
     let select = data.select;
     let secondary_click_data = data.clone();
@@ -320,7 +167,7 @@ fn file_explorer_view(
 
     scroll(
         virtual_stack(
-            move || FileNodeVirtualList::new(root.get(), data.naming.get()),
+            move || FileNodeVirtualList::new(root.get()),
             move |node| (node.kind.clone(), node.is_dir, node.open, node.level),
             move |node| {
                 let level = node.level;
@@ -428,7 +275,8 @@ fn file_explorer_view(
                 .debug_name("file item");
 
                 // Only handle click events if we are not naming the file node
-                if let FileNodeViewKind::Path(path) = &kind {
+                {
+                    let FileNodeViewKind::Path(path) = &kind;
                     let click_path = path.clone();
                     let double_click_path = path.clone();
                     let secondary_click_path = path.clone();
@@ -460,8 +308,6 @@ fn file_explorer_view(
                             }
                         },
                     )
-                } else {
-                    view
                 }
             },
         )
@@ -470,10 +316,8 @@ fn file_explorer_view(
     )
     .style(|s| s.absolute().size_full().line_height(1.8))
     .on_secondary_click_stop(move |_| {
-        if let Naming::None = naming.get_untracked() {
-            if let Some(path) = &secondary_click_data.common.workspace.path {
-                secondary_click_data.secondary_click(path);
-            }
+        if let Some(path) = &secondary_click_data.common.workspace.path {
+            secondary_click_data.secondary_click(path);
         }
     })
     .on_resize(move |rect| {

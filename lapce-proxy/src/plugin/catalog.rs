@@ -11,15 +11,14 @@ use std::{
 
 use lapce_rpc::{
     RpcError,
-    dap_types::{self, DapId, DapServer, SetBreakpointsResponse},
     plugin::{PluginId, VoltID, VoltInfo, VoltMetadata},
     proxy::ProxyResponse,
     style::LineStyle,
 };
 use lapce_xi_rope::{Rope, RopeDelta};
 use lsp_types::{
-    DidOpenTextDocumentParams, MessageType, SemanticTokens, ShowMessageParams,
-    TextDocumentIdentifier, TextDocumentItem, VersionedTextDocumentIdentifier,
+    DidOpenTextDocumentParams, SemanticTokens, TextDocumentIdentifier,
+    TextDocumentItem, VersionedTextDocumentIdentifier,
     notification::DidOpenTextDocument, request::Request,
 };
 use parking_lot::Mutex;
@@ -28,7 +27,6 @@ use serde_json::Value;
 
 use super::{
     PluginCatalogNotification, PluginCatalogRpcHandler,
-    dap::{DapClient, DapRpcHandler, DebuggerData},
     psp::{CloneableCallback, PluginServerRpc, PluginServerRpcHandler, RpcCallback},
     wasi::{load_all_volts, start_volt},
 };
@@ -40,8 +38,6 @@ pub struct PluginCatalog {
     workspace: Option<PathBuf>,
     plugin_rpc: PluginCatalogRpcHandler,
     plugins: HashMap<PluginId, PluginServerRpcHandler>,
-    daps: HashMap<DapId, DapRpcHandler>,
-    debuggers: HashMap<String, DebuggerData>,
     plugin_configurations: HashMap<String, HashMap<String, serde_json::Value>>,
     unactivated_volts: HashMap<VoltID, VoltMetadata>,
     open_files: HashMap<PathBuf, String>,
@@ -60,8 +56,6 @@ impl PluginCatalog {
             plugin_rpc: plugin_rpc.clone(),
             plugin_configurations,
             plugins: HashMap::new(),
-            daps: HashMap::new(),
-            debuggers: HashMap::new(),
             unactivated_volts: HashMap::new(),
             open_files: HashMap::new(),
         };
@@ -282,6 +276,24 @@ impl PluginCatalog {
         self.start_unactivated_volts(to_be_activated);
     }
 
+    pub fn handle_did_close_text_document(&mut self, path: PathBuf) {
+        let language_id = self.open_files.remove(&path);
+        let Ok(uri) = lsp_types::Url::from_file_path(&path) else {
+            return;
+        };
+        for plugin in self.plugins.values() {
+            plugin.server_notification(
+                <lsp_types::notification::DidCloseTextDocument as lsp_types::notification::Notification>::METHOD,
+                lsp_types::DidCloseTextDocumentParams {
+                    text_document: TextDocumentIdentifier { uri: uri.clone() },
+                },
+                language_id.clone(),
+                Some(path.clone()),
+                true,
+            );
+        }
+    }
+
     pub fn handle_did_open_text_document(&mut self, document: TextDocumentItem) {
         match document.uri.to_file_path() {
             Ok(path) => {
@@ -371,100 +383,6 @@ impl PluginCatalog {
                 text,
                 f,
             });
-        } else {
-            f.call(Err(RpcError {
-                code: 0,
-                message: "plugin doesn't exist".to_string(),
-            }));
-        }
-    }
-
-    pub fn dap_variable(
-        &self,
-        dap_id: DapId,
-        reference: usize,
-        f: Box<dyn RpcCallback<Vec<dap_types::Variable>, RpcError>>,
-    ) {
-        if let Some(dap) = self.daps.get(&dap_id) {
-            dap.variables_async(
-                reference,
-                |result: Result<dap_types::VariablesResponse, RpcError>| {
-                    f.call(result.map(|resp| resp.variables))
-                },
-            );
-        } else {
-            f.call(Err(RpcError {
-                code: 0,
-                message: "plugin doesn't exist".to_string(),
-            }));
-        }
-    }
-
-    pub fn dap_get_scopes(
-        &self,
-        dap_id: DapId,
-        frame_id: usize,
-        f: Box<
-            dyn RpcCallback<
-                    Vec<(dap_types::Scope, Vec<dap_types::Variable>)>,
-                    RpcError,
-                >,
-        >,
-    ) {
-        if let Some(dap) = self.daps.get(&dap_id) {
-            let local_dap = dap.clone();
-            dap.scopes_async(
-                frame_id,
-                move |result: Result<dap_types::ScopesResponse, RpcError>| {
-                    match result {
-                        Ok(resp) => {
-                            let scopes = resp.scopes.clone();
-                            if let Some(scope) = resp.scopes.first() {
-                                let scope = scope.to_owned();
-                                thread::spawn(move || {
-                                    local_dap.variables_async(
-                                        scope.variables_reference,
-                                        move |result: Result<
-                                            dap_types::VariablesResponse,
-                                            RpcError,
-                                        >| {
-                                            let resp: Vec<(
-                                                dap_types::Scope,
-                                                Vec<dap_types::Variable>,
-                                            )> = scopes
-                                                .iter()
-                                                .enumerate()
-                                                .map(|(index, s)| {
-                                                    (
-                                                        s.clone(),
-                                                        if index == 0 {
-                                                            result
-                                                                .as_ref()
-                                                                .map(|resp| {
-                                                                    resp.variables
-                                                                        .clone()
-                                                                })
-                                                                .unwrap_or_default()
-                                                        } else {
-                                                            Vec::new()
-                                                        },
-                                                    )
-                                                })
-                                                .collect();
-                                            f.call(Ok(resp));
-                                        },
-                                    );
-                                });
-                            } else {
-                                f.call(Ok(Vec::new()));
-                            }
-                        }
-                        Err(e) => {
-                            f.call(Err(e));
-                        }
-                    }
-                },
-            );
         } else {
             f.call(Err(RpcError {
                 code: 0,
@@ -581,170 +499,6 @@ impl PluginCatalog {
                         tracing::error!("{:?}", err);
                     }
                 });
-            }
-            DapLoaded(dap_rpc) => {
-                self.daps.insert(dap_rpc.dap_id, dap_rpc);
-            }
-            DapDisconnected(dap_id) => {
-                self.daps.remove(&dap_id);
-            }
-            DapStart {
-                config,
-                breakpoints,
-            } => {
-                let workspace = self.workspace.clone();
-                let plugin_rpc = self.plugin_rpc.clone();
-                if let Some(debugger) = config
-                    .ty
-                    .as_ref()
-                    .and_then(|ty| self.debuggers.get(ty).cloned())
-                {
-                    thread::spawn(move || {
-                        match DapClient::start(
-                            DapServer {
-                                program: debugger.program,
-                                args: debugger.args.unwrap_or_default(),
-                                cwd: workspace,
-                            },
-                            config.clone(),
-                            breakpoints,
-                            plugin_rpc.clone(),
-                        ) {
-                            Ok(dap_rpc) => {
-                                if let Err(err) =
-                                    plugin_rpc.dap_loaded(dap_rpc.clone())
-                                {
-                                    tracing::error!("{:?}", err);
-                                }
-
-                                if let Err(err) = dap_rpc.launch(&config) {
-                                    tracing::error!("{:?}", err);
-                                }
-                            }
-                            Err(err) => {
-                                tracing::error!("{:?}", err);
-                            }
-                        }
-                    });
-                } else {
-                    self.plugin_rpc.core_rpc.show_message(
-                        "debug fail".to_owned(),
-                        ShowMessageParams {
-                            typ: MessageType::ERROR,
-                            message: "Debugger not found. Please install the appropriate plugin.".to_owned(),
-                        },
-                    )
-                }
-            }
-            DapProcessId {
-                dap_id,
-                process_id,
-                term_id,
-            } => {
-                if let Some(dap) = self.daps.get(&dap_id) {
-                    if let Err(err) =
-                        dap.termain_process_tx.send((term_id, process_id))
-                    {
-                        tracing::error!("{:?}", err);
-                    }
-                }
-            }
-            DapContinue { dap_id, thread_id } => {
-                if let Some(dap) = self.daps.get(&dap_id).cloned() {
-                    let plugin_rpc = self.plugin_rpc.clone();
-                    thread::spawn(move || {
-                        if dap.continue_thread(thread_id).is_ok() {
-                            plugin_rpc.core_rpc.dap_continued(dap_id);
-                        }
-                    });
-                }
-            }
-            DapPause { dap_id, thread_id } => {
-                if let Some(dap) = self.daps.get(&dap_id).cloned() {
-                    thread::spawn(move || {
-                        if let Err(err) = dap.pause_thread(thread_id) {
-                            tracing::error!("{:?}", err);
-                        }
-                    });
-                }
-            }
-            DapStepOver { dap_id, thread_id } => {
-                if let Some(dap) = self.daps.get(&dap_id).cloned() {
-                    dap.next(thread_id);
-                }
-            }
-            DapStepInto { dap_id, thread_id } => {
-                if let Some(dap) = self.daps.get(&dap_id).cloned() {
-                    dap.step_in(thread_id);
-                }
-            }
-            DapStepOut { dap_id, thread_id } => {
-                if let Some(dap) = self.daps.get(&dap_id).cloned() {
-                    dap.step_out(thread_id);
-                }
-            }
-            DapStop { dap_id } => {
-                if let Some(dap) = self.daps.get(&dap_id) {
-                    dap.stop();
-                }
-            }
-            DapDisconnect { dap_id } => {
-                if let Some(dap) = self.daps.get(&dap_id).cloned() {
-                    thread::spawn(move || {
-                        if let Err(err) = dap.disconnect() {
-                            tracing::error!("{:?}", err);
-                        }
-                    });
-                }
-            }
-            DapRestart {
-                dap_id,
-                breakpoints,
-            } => {
-                if let Some(dap) = self.daps.get(&dap_id) {
-                    dap.restart(breakpoints);
-                }
-            }
-            DapSetBreakpoints {
-                dap_id,
-                path,
-                breakpoints,
-            } => {
-                if let Some(dap) = self.daps.get(&dap_id) {
-                    let core_rpc = self.plugin_rpc.core_rpc.clone();
-                    dap.set_breakpoints_async(
-                        path.clone(),
-                        breakpoints,
-                        move |result: Result<SetBreakpointsResponse, RpcError>| {
-                            match result {
-                                Ok(resp) => {
-                                    core_rpc.dap_breakpoints_resp(
-                                        dap_id,
-                                        path,
-                                        resp.breakpoints.unwrap_or_default(),
-                                    );
-                                }
-                                Err(err) => {
-                                    tracing::error!("{:?}", err);
-                                }
-                            }
-                        },
-                    );
-                }
-            }
-            RegisterDebuggerType {
-                debugger_type,
-                program,
-                args,
-            } => {
-                self.debuggers.insert(
-                    debugger_type.clone(),
-                    DebuggerData {
-                        debugger_type,
-                        program,
-                        args,
-                    },
-                );
             }
             Shutdown => {
                 for (_, plugin) in self.plugins.iter() {

@@ -22,7 +22,7 @@ use crate::{
     config::{LapceConfig, color::LapceColor, icon::LapceIcons},
     doc::{Doc, DocContent},
     editor::{
-        EditorData, EditorInfo,
+        EditorData, EditorInfo, EditorInfoExt,
         diff::{DiffEditorData, DiffEditorInfo},
         location::EditorLocation,
     },
@@ -213,7 +213,7 @@ impl EditorTabChild {
                     let doc = editor_data.doc_signal().get();
                     let (content, is_pristine, confirmed) = (
                         doc.content.get(),
-                        doc.buffer.with(|b| b.is_pristine()),
+                        doc.is_pristine_tracked(),
                         editor_data.confirmed,
                     );
                     match content {
@@ -271,10 +271,7 @@ impl EditorTabChild {
                         [diff_editor_data.left, diff_editor_data.right].map(|data| {
                             let (content, is_pristine) =
                                 data.doc_signal().with(|doc| {
-                                    (
-                                        doc.content.get(),
-                                        doc.buffer.with(|b| b.is_pristine()),
-                                    )
+                                    (doc.content.get(), doc.is_pristine_tracked())
                                 });
                             match content {
                                 DocContent::File { path, .. } => {

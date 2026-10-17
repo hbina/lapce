@@ -12,7 +12,7 @@ use anyhow::{Result, anyhow};
 use floem_editor_core::buffer::rope_text::CharIndicesJoin;
 use lapce_core::encoding::offset_utf8_to_utf16;
 use lapce_rpc::buffer::BufferId;
-use lapce_xi_rope::{RopeDelta, interval::IntervalBounds, rope::Rope};
+use lapce_xi_rope::{DeltaElement, RopeDelta, interval::IntervalBounds, rope::Rope};
 use lsp_types::*;
 
 #[derive(Clone)]
@@ -117,14 +117,37 @@ impl Buffer {
         &mut self,
         delta: &RopeDelta,
         rev: u64,
-    ) -> Option<TextDocumentContentChangeEvent> {
-        if self.rev + 1 != rev {
-            return None;
+    ) -> Result<TextDocumentContentChangeEvent> {
+        if self.read_only {
+            return Err(anyhow!("buffer is read only"));
         }
-        self.rev += 1;
+        if self.rev.checked_add(1) != Some(rev) {
+            return Err(anyhow!(
+                "revision conflict: current {}, received {rev}",
+                self.rev
+            ));
+        }
+        if delta.base_len != self.rope.len() {
+            return Err(anyhow!("delta base length does not match buffer"));
+        }
+        let mut previous_end = 0;
+        for element in &delta.els {
+            if let DeltaElement::Copy(start, end) = element {
+                if *start < previous_end
+                    || start > end
+                    || *end > self.rope.len()
+                    || !self.rope.is_codepoint_boundary(*start)
+                    || !self.rope.is_codepoint_boundary(*end)
+                {
+                    return Err(anyhow!("invalid delta copy range"));
+                }
+                previous_end = *end;
+            }
+        }
+        self.rev = rev;
         let content_change = get_document_content_changes(delta, self);
         self.rope = delta.apply(&self.rope);
-        Some(
+        Ok(
             content_change.unwrap_or_else(|| TextDocumentContentChangeEvent {
                 range: None,
                 range_length: None,
@@ -150,7 +173,7 @@ impl Buffer {
         (line, offset - self.offset_of_line(line))
     }
 
-    /// Converts a UTF8 offset to a UTF16 LSP position  
+    /// Converts a UTF8 offset to a UTF16 LSP position
     pub fn offset_to_position(&self, offset: usize) -> Position {
         let (line, col) = self.offset_to_line_col(offset);
         // Get the offset of line to make the conversion cheaper, rather than working
@@ -174,7 +197,7 @@ impl Buffer {
             .slice_to_cow(self.offset_of_line(line)..self.offset_of_line(line + 1))
     }
 
-    /// Iterate over (utf8_offset, char) values in the given range  
+    /// Iterate over (utf8_offset, char) values in the given range
     /// This uses `iter_chunks` and so does not allocate, compared to `slice_to_cow` which can
     pub fn char_indices_iter<T: IntervalBounds>(
         &self,

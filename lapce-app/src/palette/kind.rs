@@ -15,7 +15,6 @@ pub enum PaletteKind {
     WorkspaceSymbol,
     SshHost,
 
-    RunAndDebug,
     ColorTheme,
     IconTheme,
     Language,
@@ -42,7 +41,6 @@ impl PaletteKind {
             | PaletteKind::FileChooser
             | PaletteKind::Reference
             | PaletteKind::SshHost
-            | PaletteKind::RunAndDebug
             | PaletteKind::ColorTheme
             | PaletteKind::IconTheme
             | PaletteKind::Language
@@ -88,9 +86,6 @@ impl PaletteKind {
             PaletteKind::Reference => None, // InternalCommand::PaletteReferences
             PaletteKind::SshHost => Some(LapceWorkbenchCommand::ConnectSshHost),
 
-            PaletteKind::RunAndDebug => {
-                Some(LapceWorkbenchCommand::PaletteRunAndDebug)
-            }
             PaletteKind::ColorTheme => Some(LapceWorkbenchCommand::ChangeColorTheme),
             PaletteKind::IconTheme => Some(LapceWorkbenchCommand::ChangeIconTheme),
             PaletteKind::Language => Some(LapceWorkbenchCommand::ChangeFileLanguage),
@@ -123,7 +118,6 @@ impl PaletteKind {
             | PaletteKind::FileChooser
             | PaletteKind::Reference
             | PaletteKind::SshHost
-            | PaletteKind::RunAndDebug
             | PaletteKind::ColorTheme
             | PaletteKind::IconTheme
             | PaletteKind::Language

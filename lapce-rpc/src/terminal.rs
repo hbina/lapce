@@ -24,3 +24,18 @@ pub struct TerminalProfile {
 }
 
 impl TerminalProfile {}
+
+/// PTYs encode dimensions as nonzero 16-bit cell counts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TerminalSize {
+    pub columns: u16,
+    pub rows: u16,
+}
+impl TerminalSize {
+    pub fn clamp(columns: usize, rows: usize) -> Self {
+        Self {
+            columns: columns.clamp(1, u16::MAX as usize) as u16,
+            rows: rows.clamp(1, u16::MAX as usize) as u16,
+        }
+    }
+}

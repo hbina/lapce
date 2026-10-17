@@ -44,7 +44,6 @@ use crate::{
         CommandExecuted, CommandKind, InternalCommand, LapceCommand, WindowCommand,
     },
     db::LapceDb,
-    debug::{RunDebugConfigs, RunDebugMode},
     editor::{
         EditorData,
         location::{EditorLocation, EditorPosition},
@@ -59,8 +58,6 @@ use crate::{
 
 pub mod item;
 pub mod kind;
-
-pub const DEFAULT_RUN_TOML: &str = include_str!("../../defaults/run.toml");
 
 #[derive(Clone, PartialEq, Eq)]
 pub enum PaletteStatus {
@@ -102,7 +99,6 @@ pub struct PaletteData {
     /// Listened on for which entry in the palette has been clicked
     pub clicked_index: RwSignal<Option<usize>>,
     pub executed_commands: Rc<RefCell<HashMap<String, Instant>>>,
-    pub executed_run_configs: Rc<RefCell<HashMap<(RunDebugMode, String), Instant>>>,
     pub main_split: MainSplitData,
     pub references: RwSignal<Vec<EditorLocation>>,
     pub source_control: SourceControlData,
@@ -236,7 +232,6 @@ impl PaletteData {
             keypress,
             clicked_index,
             executed_commands: Rc::new(RefCell::new(HashMap::new())),
-            executed_run_configs: Rc::new(RefCell::new(HashMap::new())),
             references,
             source_control,
             common,
@@ -401,9 +396,6 @@ impl PaletteData {
                 self.get_ssh_hosts();
             }
 
-            PaletteKind::RunAndDebug => {
-                self.get_run_configs();
-            }
             PaletteKind::ColorTheme => {
                 self.get_color_themes();
             }
@@ -639,20 +631,28 @@ impl PaletteData {
                 .sorted_by_key(|(_, i)| *i)
                 .rev()
                 .filter_map(|(key, _)| {
-                    keypress.commands.get(key).and_then(|c| {
-                        c.kind.desc().as_ref().map(|m| PaletteItem {
-                            content: PaletteItemContent::Command { cmd: c.clone() },
-                            filter_text: m.to_string(),
-                            score: 0,
-                            indices: vec![],
+                    keypress
+                        .commands
+                        .get(key)
+                        .filter(|c| c.kind.available_in_code_browser())
+                        .and_then(|c| {
+                            c.kind.desc().as_ref().map(|m| PaletteItem {
+                                content: PaletteItemContent::Command {
+                                    cmd: c.clone(),
+                                },
+                                filter_text: m.to_string(),
+                                score: 0,
+                                indices: vec![],
+                            })
                         })
-                    })
                 })
                 .collect();
             // Add all the rest of the commands, ignoring palette commands (because we're in it)
             // and commands that are sorted earlier due to being executed.
             items.extend(keypress.commands.iter().filter_map(|(_, c)| {
-                if EXCLUDED_ITEMS.contains(&c.kind.str()) {
+                if !c.kind.available_in_code_browser()
+                    || EXCLUDED_ITEMS.contains(&c.kind.str())
+                {
                     return None;
                 }
 
@@ -738,19 +738,18 @@ impl PaletteData {
                 return;
             }
         };
-        let path = doc
-            .content
-            .with_untracked(|content| content.path().cloned());
-        let path = match path {
-            Some(path) => path,
-            None => {
-                self.items.update(|items| items.clear());
-                return;
-            }
-        };
-
+        let run_id = self.run_id;
+        let request_run_id = run_id.get_untracked();
+        let status = self.status;
+        let kind = self.kind;
         let set_items = self.items.write_only();
         let send = create_ext_action(self.common.scope, move |result| {
+            if run_id.get_untracked() != request_run_id
+                || status.get_untracked() != PaletteStatus::Started
+                || kind.get_untracked() != PaletteKind::DocumentSymbol
+            {
+                return;
+            }
             if let Ok(ProxyResponse::GetDocumentSymbols { resp }) = result {
                 let items = Self::format_document_symbol_resp(resp);
                 set_items.set(items);
@@ -759,9 +758,10 @@ impl PaletteData {
             }
         });
 
-        self.common.proxy.get_document_symbols(path, move |result| {
-            send(result);
-        });
+        doc.request_navigation(
+            lapce_engine::navigation::NavigationQuery::Symbols,
+            move |result| send(result),
+        );
     }
 
     fn format_document_symbol_resp(
@@ -825,9 +825,23 @@ impl PaletteData {
     fn get_workspace_symbols(&self) {
         let input = self.input.get_untracked().input;
 
+        let plan =
+            lapce_engine::workspace::WorkspaceSymbolsQuery::new(input.clone());
+        let request = plan.request();
+        let current_input = self.input;
+        let status = self.status;
+        let run_id = self.run_id;
+        let request_run_id = run_id.get_untracked();
         let set_items = self.items.write_only();
         let send = create_ext_action(self.common.scope, move |result| {
-            if let Ok(ProxyResponse::GetWorkspaceSymbols { symbols }) = result {
+            if status.get_untracked() != PaletteStatus::Started
+                || run_id.get_untracked() != request_run_id
+                || current_input.get_untracked().input != input
+                || current_input.get_untracked().kind != PaletteKind::WorkspaceSymbol
+            {
+                return;
+            }
+            if let Ok(symbols) = plan.finish(result) {
                 let items: im::Vector<PaletteItem> = symbols
                     .iter()
                     .map(|s| {
@@ -863,11 +877,9 @@ impl PaletteData {
             }
         });
 
-        self.common
-            .proxy
-            .get_workspace_symbols(input, move |result| {
-                send(result);
-            });
+        self.common.proxy.request_async(request, move |result| {
+            send(result);
+        });
     }
 
     fn get_ssh_hosts(&self) {
@@ -890,96 +902,6 @@ impl PaletteData {
             })
             .collect();
         self.items.set(items);
-    }
-
-    fn set_run_configs(&self, content: String) {
-        let configs: Option<RunDebugConfigs> = toml::from_str(&content).ok();
-        if configs.is_none() {
-            if let Some(path) = self.workspace.path.as_ref() {
-                let path = path.join(".lapce").join("run.toml");
-                self.common
-                    .internal_command
-                    .send(InternalCommand::OpenFile { path });
-            }
-        }
-
-        let executed_run_configs = self.executed_run_configs.borrow();
-        let mut items = Vec::new();
-        if let Some(configs) = configs.as_ref() {
-            for config in &configs.configs {
-                items.push((
-                    executed_run_configs
-                        .get(&(RunDebugMode::Run, config.name.clone())),
-                    PaletteItem {
-                        content: PaletteItemContent::RunAndDebug {
-                            mode: RunDebugMode::Run,
-                            config: config.clone(),
-                        },
-                        filter_text: format!(
-                            "Run {} {} {}",
-                            config.name,
-                            config.program,
-                            config.args.clone().unwrap_or_default().join(" ")
-                        ),
-                        score: 0,
-                        indices: vec![],
-                    },
-                ));
-                if config.ty.is_some() {
-                    items.push((
-                        executed_run_configs
-                            .get(&(RunDebugMode::Debug, config.name.clone())),
-                        PaletteItem {
-                            content: PaletteItemContent::RunAndDebug {
-                                mode: RunDebugMode::Debug,
-                                config: config.clone(),
-                            },
-                            filter_text: format!(
-                                "Debug {} {} {}",
-                                config.name,
-                                config.program,
-                                config.args.clone().unwrap_or_default().join(" ")
-                            ),
-                            score: 0,
-                            indices: vec![],
-                        },
-                    ));
-                }
-            }
-        }
-
-        items.sort_by_key(|(executed, _item)| std::cmp::Reverse(executed.copied()));
-        self.items
-            .set(items.into_iter().map(|(_, item)| item).collect());
-    }
-
-    fn get_run_configs(&self) {
-        if let Some(workspace) = self.common.workspace.path.as_deref() {
-            let run_toml = workspace.join(".lapce").join("run.toml");
-            let (doc, new_doc) = self.main_split.get_doc(run_toml.clone(), None);
-            if !new_doc {
-                let content = doc.buffer.with_untracked(|b| b.to_string());
-                self.set_run_configs(content);
-            } else {
-                let loaded = doc.loaded;
-                let palette = self.clone();
-                self.common.scope.create_effect(move |prev_loaded| {
-                    if prev_loaded == Some(true) {
-                        return true;
-                    }
-
-                    let loaded = loaded.get();
-                    if loaded {
-                        let content = doc.buffer.with_untracked(|b| b.to_string());
-                        if content.is_empty() {
-                            doc.reload(Rope::from(DEFAULT_RUN_TOML), false);
-                        }
-                        palette.set_run_configs(content);
-                    }
-                    loaded
-                });
-            }
-        }
     }
 
     fn get_color_themes(&self) {
@@ -1294,14 +1216,7 @@ impl PaletteData {
                         },
                     );
                 }
-                PaletteItemContent::RunAndDebug { mode, config } => {
-                    self.common.internal_command.send(
-                        InternalCommand::RunAndDebug {
-                            mode: *mode,
-                            config: config.clone(),
-                        },
-                    );
-                }
+
                 PaletteItemContent::ColorTheme { name } => self
                     .common
                     .internal_command
@@ -1423,7 +1338,7 @@ impl PaletteData {
                 }
                 PaletteItemContent::Command { .. } => {}
                 PaletteItemContent::Workspace { .. } => {}
-                PaletteItemContent::RunAndDebug { .. } => {}
+
                 PaletteItemContent::SshHost { .. } => {}
 
                 PaletteItemContent::Language { .. } => {}
@@ -1431,7 +1346,7 @@ impl PaletteData {
                 PaletteItemContent::Reference { location, .. } => {
                     self.has_preview.set(true);
                     let (doc, new_doc) =
-                        self.main_split.get_doc(location.path.clone(), None);
+                        self.main_split.get_doc(location.path.clone());
                     self.preview_editor.update_doc(doc);
                     self.preview_editor.go_to_location(
                         location.clone(),
@@ -1471,7 +1386,7 @@ impl PaletteData {
                 PaletteItemContent::WorkspaceSymbol { location, .. } => {
                     self.has_preview.set(true);
                     let (doc, new_doc) =
-                        self.main_split.get_doc(location.path.clone(), None);
+                        self.main_split.get_doc(location.path.clone());
                     self.preview_editor.update_doc(doc);
                     self.preview_editor.go_to_location(
                         location.clone(),

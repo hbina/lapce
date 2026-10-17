@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    fs, io,
+    fs,
     path::{Path, PathBuf},
     sync::{
         Arc,
@@ -24,7 +24,7 @@ use lapce_rpc::{
     RequestId, RpcError,
     buffer::BufferId,
     core::{CoreNotification, CoreRpcHandler, FileChanged},
-    file::FileNodeItem,
+    file::DirectoryEntry,
     file_line::FileLine,
     proxy::{
         ProxyHandler, ProxyNotification, ProxyRequest, ProxyResponse,
@@ -36,8 +36,7 @@ use lapce_rpc::{
 };
 use lapce_xi_rope::Rope;
 use lsp_types::{
-    CancelParams, MessageType, NumberOrString, Position, Range, ShowMessageParams,
-    TextDocumentItem, Url,
+    CancelParams, NumberOrString, Position, Range, TextDocumentItem, Url,
     notification::{Cancel, Notification},
 };
 use parking_lot::Mutex;
@@ -60,12 +59,28 @@ pub struct Dispatcher {
     buffers: HashMap<PathBuf, Buffer>,
     terminals: HashMap<TermId, TerminalSender>,
     file_watcher: FileWatcher,
-    window_id: usize,
-    tab_id: usize,
+    search_generation: Arc<AtomicU64>,
 }
 
 impl ProxyHandler for Dispatcher {
     fn handle_notification(&mut self, rpc: ProxyNotification) {
+        if matches!(
+            &rpc,
+            ProxyNotification::DapStart { .. }
+                | ProxyNotification::DapProcessId { .. }
+                | ProxyNotification::DapContinue { .. }
+                | ProxyNotification::DapStepOver { .. }
+                | ProxyNotification::DapStepInto { .. }
+                | ProxyNotification::DapStepOut { .. }
+                | ProxyNotification::DapPause { .. }
+                | ProxyNotification::DapStop { .. }
+                | ProxyNotification::DapDisconnect { .. }
+                | ProxyNotification::DapRestart { .. }
+                | ProxyNotification::DapSetBreakpoints { .. }
+                | ProxyNotification::Completion { .. }
+        ) {
+            return;
+        }
         use ProxyNotification::*;
         match rpc {
             Initialize {
@@ -73,11 +88,8 @@ impl ProxyHandler for Dispatcher {
                 disabled_volts,
                 extra_plugin_paths,
                 plugin_configurations,
-                window_id,
-                tab_id,
+                ..
             } => {
-                self.window_id = window_id;
-                self.tab_id = tab_id;
                 self.workspace = workspace;
                 self.file_watcher.notify(FileWatchNotifier::new(
                     self.workspace.clone(),
@@ -138,7 +150,8 @@ impl ProxyHandler for Dispatcher {
                         }
                     }
                 } else {
-                    self.buffers.remove(&path);
+                    // Disk deletion is an event, not a document close. The
+                    // owner may still have unsaved text or recreate the file.
                     self.core_rpc.open_file_changed(path, FileChanged::Delete);
                 }
             }
@@ -159,23 +172,12 @@ impl ProxyHandler for Dispatcher {
                 self.catalog_rpc.signature_help(request_id, &path, position);
             }
             Shutdown {} => {
+                self.search_generation.fetch_add(1, Ordering::SeqCst);
                 self.catalog_rpc.shutdown();
                 for (_, sender) in self.terminals.iter() {
                     sender.send(Msg::Shutdown);
                 }
                 self.proxy_rpc.shutdown();
-            }
-            Update { path, delta, rev } => {
-                let buffer = self.buffers.get_mut(&path).unwrap();
-                let old_text = buffer.rope.clone();
-                buffer.update(&delta, rev);
-                self.catalog_rpc.did_change_text_document(
-                    &path,
-                    rev,
-                    delta,
-                    old_text,
-                    buffer.rope.clone(),
-                );
             }
             UpdatePluginConfigs { configs } => {
                 if let Err(err) = self.catalog_rpc.update_plugin_configs(configs) {
@@ -219,9 +221,11 @@ impl ProxyHandler for Dispatcher {
                 height,
             } => {
                 if let Some(tx) = self.terminals.get(&term_id) {
+                    let dimensions =
+                        lapce_rpc::terminal::TerminalSize::clamp(width, height);
                     let size = WindowSize {
-                        num_lines: height as u16,
-                        num_cols: width as u16,
+                        num_lines: dimensions.rows,
+                        num_cols: dimensions.columns,
                         cell_width: 1,
                         cell_height: 1,
                     };
@@ -234,80 +238,17 @@ impl ProxyHandler for Dispatcher {
                     tx.send(Msg::Shutdown);
                 }
             }
-            DapStart {
-                config,
-                breakpoints,
-            } => {
-                if let Err(err) = self.catalog_rpc.dap_start(config, breakpoints) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            DapProcessId {
-                dap_id,
-                process_id,
-                term_id,
-            } => {
-                if let Err(err) =
-                    self.catalog_rpc.dap_process_id(dap_id, process_id, term_id)
-                {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            DapContinue { dap_id, thread_id } => {
-                if let Err(err) = self.catalog_rpc.dap_continue(dap_id, thread_id) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            DapPause { dap_id, thread_id } => {
-                if let Err(err) = self.catalog_rpc.dap_pause(dap_id, thread_id) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            DapStepOver { dap_id, thread_id } => {
-                if let Err(err) = self.catalog_rpc.dap_step_over(dap_id, thread_id) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            DapStepInto { dap_id, thread_id } => {
-                if let Err(err) = self.catalog_rpc.dap_step_into(dap_id, thread_id) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            DapStepOut { dap_id, thread_id } => {
-                if let Err(err) = self.catalog_rpc.dap_step_out(dap_id, thread_id) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            DapStop { dap_id } => {
-                if let Err(err) = self.catalog_rpc.dap_stop(dap_id) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            DapDisconnect { dap_id } => {
-                if let Err(err) = self.catalog_rpc.dap_disconnect(dap_id) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            DapRestart {
-                dap_id,
-                breakpoints,
-            } => {
-                if let Err(err) = self.catalog_rpc.dap_restart(dap_id, breakpoints) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            DapSetBreakpoints {
-                dap_id,
-                path,
-                breakpoints,
-            } => {
-                if let Err(err) =
-                    self.catalog_rpc
-                        .dap_set_breakpoints(dap_id, path, breakpoints)
-                {
-                    tracing::error!("{:?}", err);
-                }
-            }
+            DapStart { .. }
+            | DapProcessId { .. }
+            | DapContinue { .. }
+            | DapPause { .. }
+            | DapStepOver { .. }
+            | DapStepInto { .. }
+            | DapStepOut { .. }
+            | DapStop { .. }
+            | DapDisconnect { .. }
+            | DapRestart { .. }
+            | DapSetBreakpoints { .. } => {}
             InstallVolt { volt } => {
                 let catalog_rpc = self.catalog_rpc.clone();
                 if let Err(err) = catalog_rpc.install_volt(volt) {
@@ -330,57 +271,6 @@ impl ProxyHandler for Dispatcher {
                     tracing::error!("{:?}", err);
                 }
             }
-            GitCommit { message, diffs } => {
-                if let Some(workspace) = self.workspace.as_ref() {
-                    match git_commit(workspace, &message, diffs) {
-                        Ok(()) => (),
-                        Err(e) => {
-                            self.core_rpc.show_message(
-                                "Git Commit failure".to_owned(),
-                                ShowMessageParams {
-                                    typ: MessageType::ERROR,
-                                    message: e.to_string(),
-                                },
-                            );
-                        }
-                    }
-                }
-            }
-            GitCheckout { reference } => {
-                if let Some(workspace) = self.workspace.as_ref() {
-                    match git_checkout(workspace, &reference) {
-                        Ok(()) => (),
-                        Err(e) => eprintln!("{e:?}"),
-                    }
-                }
-            }
-            GitDiscardFilesChanges { files } => {
-                if let Some(workspace) = self.workspace.as_ref() {
-                    match git_discard_files_changes(
-                        workspace,
-                        files.iter().map(AsRef::as_ref),
-                    ) {
-                        Ok(()) => (),
-                        Err(e) => eprintln!("{e:?}"),
-                    }
-                }
-            }
-            GitDiscardWorkspaceChanges {} => {
-                if let Some(workspace) = self.workspace.as_ref() {
-                    match git_discard_workspace_changes(workspace) {
-                        Ok(()) => (),
-                        Err(e) => eprintln!("{e:?}"),
-                    }
-                }
-            }
-            GitInit {} => {
-                if let Some(workspace) = self.workspace.as_ref() {
-                    match git_init(workspace) {
-                        Ok(()) => (),
-                        Err(e) => eprintln!("{e:?}"),
-                    }
-                }
-            }
             LspCancel { id } => {
                 self.catalog_rpc.send_notification(
                     None,
@@ -397,12 +287,137 @@ impl ProxyHandler for Dispatcher {
     }
 
     fn handle_request(&mut self, id: RequestId, rpc: ProxyRequest) {
+        if !rpc.allowed_in_code_browser() {
+            self.respond_rpc(id, Err(Self::buffer_error("This code browser is read-only; editing, saving and debugging are unavailable")));
+            return;
+        }
         use ProxyRequest::*;
         match rpc {
+            GitCommit { message, diffs } => {
+                let result = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("No workspace is open"))
+                    .and_then(|workspace| git_commit(workspace, &message, diffs))
+                    .map(|()| ProxyResponse::Success {})
+                    .map_err(|error| RpcError {
+                        code: 0,
+                        message: error.to_string(),
+                    });
+                self.respond_rpc(id, result);
+            }
+            GitCheckout { reference } => {
+                let result = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("No workspace is open"))
+                    .and_then(|workspace| git_checkout(workspace, &reference))
+                    .map(|()| ProxyResponse::Success {})
+                    .map_err(|error| RpcError {
+                        code: 0,
+                        message: error.to_string(),
+                    });
+                self.respond_rpc(id, result);
+            }
+            GitDiscardFilesChanges { files } => {
+                let result = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("No workspace is open"))
+                    .and_then(|workspace| {
+                        git_discard_files_changes(
+                            workspace,
+                            files.iter().map(AsRef::as_ref),
+                        )
+                    })
+                    .map(|()| ProxyResponse::Success {})
+                    .map_err(|error| RpcError {
+                        code: 0,
+                        message: error.to_string(),
+                    });
+                self.respond_rpc(id, result);
+            }
+            GitDiscardWorkspaceChanges {} => {
+                let result = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("No workspace is open"))
+                    .and_then(|workspace| git_discard_workspace_changes(workspace))
+                    .map(|()| ProxyResponse::Success {})
+                    .map_err(|error| RpcError {
+                        code: 0,
+                        message: error.to_string(),
+                    });
+                self.respond_rpc(id, result);
+            }
+            GitInit {} => {
+                let result = self
+                    .workspace
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("No workspace is open"))
+                    .and_then(|workspace| git_init(workspace))
+                    .map(|()| ProxyResponse::Success {})
+                    .map_err(|error| RpcError {
+                        code: 0,
+                        message: error.to_string(),
+                    });
+                self.respond_rpc(id, result);
+            }
+            ApplyResourceOperation { operation } => {
+                // Session coordination must release affected documents first.
+                // Never overwrite or orphan an open backend buffer.
+                let identity = |path: &Path| {
+                    path.canonicalize().unwrap_or_else(|_| {
+                        path.parent()
+                            .and_then(|parent| parent.canonicalize().ok())
+                            .and_then(|parent| {
+                                path.file_name().map(|name| parent.join(name))
+                            })
+                            .unwrap_or_else(|| path.to_owned())
+                    })
+                };
+                let paths = operation
+                    .paths()
+                    .into_iter()
+                    .map(identity)
+                    .collect::<Vec<_>>();
+                let result = if self.buffers.keys().any(|buffer| {
+                    paths.iter().any(|path| identity(buffer).starts_with(path))
+                }) {
+                    Err(Self::buffer_error(
+                        "resource operation affects an open document; close it first",
+                    ))
+                } else {
+                    lapce_services::resource::apply(&operation)
+                        .map(|changed| ProxyResponse::ResourceOperationResponse {
+                            changed,
+                        })
+                        .map_err(|error| Self::buffer_error(error.to_string()))
+                };
+                self.respond_rpc(id, result);
+            }
             NewBuffer { buffer_id, path } => {
+                // Opening is idempotent for the owner. Never replace unsaved
+                // backend text with a fresh disk read or another client's ID.
+                if let Some(buffer) = self.buffers.get(&path) {
+                    let result = if buffer.id == buffer_id {
+                        Ok(ProxyResponse::NewBufferResponse {
+                            content: buffer.get_document(),
+                            read_only: true,
+                            rev: buffer.rev,
+                        })
+                    } else {
+                        Err(Self::buffer_error(
+                            "buffer is already owned by another document",
+                        ))
+                    };
+                    self.respond_rpc(id, result);
+                    return;
+                }
                 let buffer = Buffer::new(buffer_id, path.clone());
                 let content = buffer.rope.to_string();
-                let read_only = buffer.read_only;
+                let read_only = true;
+                let rev = buffer.rev;
                 self.catalog_rpc.did_open_document(
                     &path,
                     buffer.language_id.to_string(),
@@ -413,8 +428,63 @@ impl ProxyHandler for Dispatcher {
                 self.buffers.insert(path, buffer);
                 self.respond_rpc(
                     id,
-                    Ok(ProxyResponse::NewBufferResponse { content, read_only }),
+                    Ok(ProxyResponse::NewBufferResponse {
+                        content,
+                        read_only,
+                        rev,
+                    }),
                 );
+            }
+            GetBuffer { path } => {
+                let result = self
+                    .buffers
+                    .get(&path)
+                    .map(|buffer| ProxyResponse::BufferSnapshot {
+                        buffer_id: buffer.id,
+                        path: buffer.path.clone(),
+                        content: buffer.get_document(),
+                        read_only: true,
+                        rev: buffer.rev,
+                    })
+                    .ok_or_else(|| Self::buffer_error("buffer is not open"));
+                self.respond_rpc(id, result);
+            }
+            UpdateBuffer {
+                buffer_id,
+                path,
+                delta,
+                rev,
+            } => {
+                if self.buffers.get(&path).map(|buffer| buffer.id) != Some(buffer_id)
+                {
+                    self.respond_rpc(
+                        id,
+                        Err(Self::buffer_error("document does not own buffer")),
+                    );
+                    return;
+                }
+                let result = self
+                    .apply_buffer_update(&path, &delta, rev)
+                    .map(|()| ProxyResponse::BufferUpdated { rev });
+                self.respond_rpc(id, result);
+            }
+            CloseBuffer { buffer_id, path } => {
+                if self.buffers.get(&path).map(|buffer| buffer.id) != Some(buffer_id)
+                {
+                    self.respond_rpc(
+                        id,
+                        Err(Self::buffer_error("document does not own buffer")),
+                    );
+                    return;
+                }
+                let result = if self.buffers.remove(&path).is_some() {
+                    self.file_watcher.unwatch(&path, OPEN_FILE_EVENT_TOKEN);
+                    self.catalog_rpc.did_close_document(&path);
+                    Ok(ProxyResponse::Success {})
+                } else {
+                    Err(Self::buffer_error("buffer is not open"))
+                };
+                self.respond_rpc(id, result);
             }
             BufferHead { path } => {
                 let result = if let Some(workspace) = self.workspace.as_ref() {
@@ -444,8 +514,8 @@ impl ProxyHandler for Dispatcher {
                 whole_word,
                 is_regex,
             } => {
-                static WORKER_ID: AtomicU64 = AtomicU64::new(0);
-                let our_id = WORKER_ID.fetch_add(1, Ordering::SeqCst) + 1;
+                let generation = self.search_generation.clone();
+                let our_id = generation.fetch_add(1, Ordering::SeqCst) + 1;
 
                 let workspace = self.workspace.clone();
                 let buffers = self
@@ -462,7 +532,7 @@ impl ProxyHandler for Dispatcher {
                         id,
                         search_in_path(
                             our_id,
-                            &WORKER_ID,
+                            &generation,
                             workspace
                                 .iter()
                                 .flat_map(|w| ignore::Walk::new(w).flatten())
@@ -830,29 +900,21 @@ impl ProxyHandler for Dispatcher {
                                 .into_iter()
                                 .filter_map(|entry| {
                                     entry
-                                        .map(|e| FileNodeItem {
+                                        .map(|e| DirectoryEntry {
                                             path: e.path(),
                                             is_dir: e.path().is_dir(),
-                                            open: false,
-                                            read: false,
-                                            children: HashMap::new(),
-                                            children_open_count: 0,
                                         })
                                         .ok()
                                 })
-                                .collect::<Vec<FileNodeItem>>();
+                                .collect::<Vec<DirectoryEntry>>();
 
-                            items.sort();
+                            items.sort_by(DirectoryEntry::compare);
 
                             ProxyResponse::ReadDirResponse {
                                 items,
-                                dir: FileNodeItem {
+                                dir: DirectoryEntry {
                                     path: path.clone(),
                                     is_dir: path.is_dir(),
-                                    read: false,
-                                    open: false,
-                                    children: HashMap::new(),
-                                    children_open_count: 0,
                                 },
                             }
                         })
@@ -868,17 +930,24 @@ impl ProxyHandler for Dispatcher {
                 });
             }
             Save {
+                buffer_id,
                 rev,
                 path,
                 create_parents,
             } => {
-                let buffer = self.buffers.get_mut(&path).unwrap();
-                let result = buffer
-                    .save(rev, create_parents)
-                    .map(|_r| {
-                        self.catalog_rpc
-                            .did_save_text_document(&path, buffer.rope.clone());
-                        ProxyResponse::SaveResponse {}
+                let result = self
+                    .buffers
+                    .get_mut(&path)
+                    .ok_or_else(|| anyhow!("buffer is not open"))
+                    .and_then(|buffer| {
+                        if buffer.id != buffer_id {
+                            return Err(anyhow!("document does not own buffer"));
+                        }
+                        buffer.save(rev, create_parents).map(|_r| {
+                            self.catalog_rpc
+                                .did_save_text_document(&path, buffer.rope.clone());
+                            ProxyResponse::SaveResponse {}
+                        })
                     })
                     .map_err(|e| RpcError {
                         code: 0,
@@ -893,6 +962,19 @@ impl ProxyHandler for Dispatcher {
                 content,
                 create_parents,
             } => {
+                if self
+                    .buffers
+                    .get(&path)
+                    .is_some_and(|buffer| buffer.id != buffer_id)
+                {
+                    self.respond_rpc(
+                        id,
+                        Err(Self::buffer_error(
+                            "Save As target is already open in another document",
+                        )),
+                    );
+                    return;
+                }
                 let mut buffer = Buffer::new(buffer_id, path.clone());
                 buffer.rope = Rope::from(content);
                 buffer.rev = rev;
@@ -903,7 +985,16 @@ impl ProxyHandler for Dispatcher {
                         code: 0,
                         message: e.to_string(),
                     });
-                self.buffers.insert(path, buffer);
+                if result.is_ok() {
+                    self.catalog_rpc.did_open_document(
+                        &path,
+                        buffer.language_id.to_string(),
+                        buffer.rev as i32,
+                        buffer.rope.to_string(),
+                    );
+                    self.file_watcher.watch(&path, false, OPEN_FILE_EVENT_TOKEN);
+                    self.buffers.insert(path, buffer);
+                }
                 self.respond_rpc(id, result);
             }
             CreateFile { path } => {
@@ -972,85 +1063,6 @@ impl ProxyHandler for Dispatcher {
                 };
                 self.respond_rpc(id, result);
             }
-            RenamePath { from, to } => {
-                // We first check if the destination already exists, because rename can overwrite it
-                // and that's not the default behavior we want for when a user renames a document.
-                let result = if to.exists() {
-                    Err(format!("{} already exists", to.display()))
-                } else {
-                    Ok(())
-                };
-
-                let result = result.and_then(|_| {
-                    if let Some(parent) = to.parent() {
-                        fs::create_dir_all(parent).map_err(|e| {
-                            if let io::ErrorKind::AlreadyExists = e.kind() {
-                                format!(
-                                    "{} has a parent that is not a directory",
-                                    to.display()
-                                )
-                            } else {
-                                e.to_string()
-                            }
-                        })
-                    } else {
-                        Ok(())
-                    }
-                });
-
-                let result = result
-                    .and_then(|_| fs::rename(&from, &to).map_err(|e| e.to_string()));
-
-                let result = result
-                    .map(|_| {
-                        let to = to.canonicalize().unwrap_or(to);
-
-                        let (is_dir, is_file) = to
-                            .metadata()
-                            .map(|metadata| (metadata.is_dir(), metadata.is_file()))
-                            .unwrap_or((false, false));
-
-                        if is_dir {
-                            // Update all buffers in which a file the renamed directory is an
-                            // ancestor of is open to use the file's new path.
-                            // This could be written more nicely if `HashMap::extract_if` were
-                            // stable.
-                            let child_buffers: Vec<_> = self
-                                .buffers
-                                .keys()
-                                .filter_map(|path| {
-                                    path.strip_prefix(&from).ok().map(|suffix| {
-                                        (path.clone(), suffix.to_owned())
-                                    })
-                                })
-                                .collect();
-
-                            for (path, suffix) in child_buffers {
-                                if let Some(mut buffer) = self.buffers.remove(&path)
-                                {
-                                    let new_path = to.join(suffix);
-                                    buffer.path = new_path;
-
-                                    self.buffers.insert(buffer.path.clone(), buffer);
-                                }
-                            }
-                        } else if is_file {
-                            // If the renamed file is open in a buffer, update it to use the new
-                            // path.
-                            let buffer = self.buffers.remove(&from);
-
-                            if let Some(mut buffer) = buffer {
-                                buffer.path.clone_from(&to);
-                                self.buffers.insert(to.clone(), buffer);
-                            }
-                        }
-
-                        ProxyResponse::CreatePathResponse { path: to }
-                    })
-                    .map_err(|message| RpcError { code: 0, message });
-
-                self.respond_rpc(id, result);
-            }
             TestCreateAtPath { path } => {
                 // This performs a best effort test to see if an attempt to create an item at
                 // `path` or rename an item to `path` will succeed.
@@ -1114,29 +1126,13 @@ impl ProxyHandler for Dispatcher {
                     },
                 );
             }
-            DapVariable { dap_id, reference } => {
-                let proxy_rpc = self.proxy_rpc.clone();
-                self.catalog_rpc
-                    .dap_variable(dap_id, reference, move |result| {
-                        proxy_rpc.handle_response(
-                            id,
-                            result.map(|resp| ProxyResponse::DapVariableResponse {
-                                variables: resp,
-                            }),
-                        );
-                    });
-            }
-            DapGetScopes { dap_id, frame_id } => {
-                let proxy_rpc = self.proxy_rpc.clone();
-                self.catalog_rpc
-                    .dap_get_scopes(dap_id, frame_id, move |result| {
-                        proxy_rpc.handle_response(
-                            id,
-                            result.map(|resp| ProxyResponse::DapGetScopesResponse {
-                                scopes: resp,
-                            }),
-                        );
-                    });
+            DapVariable { .. } | DapGetScopes { .. } => {
+                self.respond_rpc(
+                    id,
+                    Err(Self::buffer_error(
+                        "Debugging is unavailable in the code browser",
+                    )),
+                );
             }
             GetCodeLens { path } => {
                 let proxy_rpc = self.proxy_rpc.clone();
@@ -1251,13 +1247,56 @@ impl Dispatcher {
             buffers: HashMap::new(),
             terminals: HashMap::new(),
             file_watcher,
-            window_id: 1,
-            tab_id: 1,
+            search_generation: Arc::new(AtomicU64::new(0)),
         }
     }
 
     fn respond_rpc(&self, id: RequestId, result: Result<ProxyResponse, RpcError>) {
         self.proxy_rpc.handle_response(id, result);
+    }
+
+    fn buffer_error(message: impl Into<String>) -> RpcError {
+        RpcError {
+            code: -32003,
+            message: message.into(),
+        }
+    }
+
+    fn apply_buffer_update(
+        &mut self,
+        path: &Path,
+        delta: &lapce_xi_rope::RopeDelta,
+        rev: u64,
+    ) -> Result<(), RpcError> {
+        let buffer = self
+            .buffers
+            .get_mut(path)
+            .ok_or_else(|| Self::buffer_error("buffer is not open"))?;
+        let old_text = buffer.rope.clone();
+        let mut candidate = buffer.clone();
+        candidate
+            .update(delta, rev)
+            .map_err(|error| Self::buffer_error(error.to_string()))?;
+        let disk = crate::buffer::load_file(path)
+            .map_err(|error| Self::buffer_error(error.to_string()))?;
+        if candidate.rope.to_string() != disk {
+            return Err(Self::buffer_error(
+                "Read-only buffers can only reload current disk text",
+            ));
+        }
+        *buffer = candidate;
+        self.catalog_rpc.did_change_text_document(
+            path,
+            rev,
+            delta.clone(),
+            old_text,
+            buffer.rope.clone(),
+        );
+        // A read-only update acknowledges text already persisted externally.
+        // Servers that run diagnostics on save must observe that disk boundary.
+        self.catalog_rpc
+            .did_save_text_document(path, buffer.rope.clone());
+        Ok(())
     }
 
     fn get_buffer_or_insert(&mut self, path: PathBuf) -> &mut Buffer {
@@ -1463,7 +1502,11 @@ fn git_checkout(workspace_path: &Path, reference: &str) -> Result<()> {
     let repo = Repository::discover(workspace_path)?;
     let (object, reference) = repo.revparse_ext(reference)?;
     repo.checkout_tree(&object, None)?;
-    repo.set_head(reference.unwrap().name().unwrap())?;
+    if let Some(reference) = reference.filter(|reference| reference.is_branch()) {
+        repo.set_head(reference.name()?)?;
+    } else {
+        repo.set_head_detached(object.id())?;
+    }
     Ok(())
 }
 

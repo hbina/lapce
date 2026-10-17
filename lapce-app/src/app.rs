@@ -66,7 +66,6 @@ use tracing_subscriber::{filter::Targets, reload::Handle};
 
 use crate::{
     about, alert,
-    code_action::CodeActionStatus,
     command::{
         CommandKind, InternalCommand, LapceCommand, LapceWorkbenchCommand,
         WindowCommand,
@@ -76,7 +75,6 @@ use crate::{
         watcher::ConfigWatcher,
     },
     db::LapceDb,
-    debug::RunDebugMode,
     editor::{
         diff::diff_show_more_section_view,
         location::{EditorLocation, EditorPosition},
@@ -136,7 +134,7 @@ struct Cli {
     /// When path is a file (that exists or not),
     /// it accepts `path:line:column` syntax
     /// to specify line and column at which it should open the file
-    #[clap(value_parser = lapce_proxy::cli::parse_file_line_column)]
+    #[clap(value_parser = lapce_services::cli::parse_file_line_column)]
     #[clap(value_hint = clap::ValueHint::AnyPath)]
     paths: Vec<PathObject>,
 }
@@ -2426,75 +2424,7 @@ fn palette_item(
                 .style(|s| s.align_items(Some(AlignItems::Center)).max_width_full()),
             )
         }
-        PaletteItemContent::RunAndDebug {
-            mode,
-            config: run_config,
-        } => {
-            let mode = *mode;
-            let text = format!("{mode} {}", run_config.name);
-            let hint = format!(
-                "{} {}",
-                run_config.program,
-                run_config.args.clone().unwrap_or_default().join(" ")
-            );
-            let text_indices: Vec<usize> = item
-                .indices
-                .iter()
-                .filter_map(|i| {
-                    let i = *i;
-                    if i < text.len() { Some(i) } else { None }
-                })
-                .collect();
-            let hint_indices: Vec<usize> = item
-                .indices
-                .iter()
-                .filter_map(|i| {
-                    let i = *i;
-                    if i >= text.len() {
-                        Some(i - text.len())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            container(
-                stack((
-                    svg(move || {
-                        let config = config.get();
-                        match mode {
-                            RunDebugMode::Run => config.ui_svg(LapceIcons::START),
-                            RunDebugMode::Debug => config.ui_svg(LapceIcons::DEBUG),
-                        }
-                    })
-                    .style(move |s| {
-                        let config = config.get();
-                        let size = config.ui.icon_size() as f32;
-                        s.min_width(size)
-                            .size(size, size)
-                            .margin_right(5.0)
-                            .color(config.color(LapceColor::LAPCE_ICON_ACTIVE))
-                    }),
-                    focus_text(
-                        move || text.clone(),
-                        move || text_indices.clone(),
-                        move || config.get().color(LapceColor::EDITOR_FOCUS),
-                    )
-                    .style(|s| s.margin_right(6.0).max_width_full()),
-                    focus_text(
-                        move || hint.clone(),
-                        move || hint_indices.clone(),
-                        move || config.get().color(LapceColor::EDITOR_FOCUS),
-                    )
-                    .style(move |s| {
-                        s.color(config.get().color(LapceColor::EDITOR_DIM))
-                            .min_width(0.0)
-                            .flex_grow(1.0f32)
-                            .flex_basis(0.0)
-                    }),
-                ))
-                .style(|s| s.align_items(Some(AlignItems::Center)).max_width_full()),
-            )
-        }
+
         PaletteItemContent::PaletteHelp { .. }
         | PaletteItemContent::Command { .. } => {
             let text = item.filter_text;
@@ -3205,134 +3135,6 @@ fn completion(window_tab_data: Rc<WindowTabData>) -> impl View {
     .debug_name("Completion Layer")
 }
 
-fn code_action(window_tab_data: Rc<WindowTabData>) -> impl View {
-    let config = window_tab_data.common.config;
-    let code_action = window_tab_data.code_action;
-    let (status, active) = code_action
-        .with_untracked(|code_action| (code_action.status, code_action.active));
-    let request_id =
-        move || code_action.with_untracked(|code_action| code_action.request_id);
-    scroll(
-        container(
-            dyn_stack(
-                move || {
-                    code_action.with(|code_action| {
-                        code_action.filtered_items.clone().into_iter().enumerate()
-                    })
-                },
-                move |(i, _item)| (request_id(), *i),
-                move |(i, item)| {
-                    container(
-                        text(item.title().replace('\n', " "))
-                            .style(|s| s.text_ellipsis().min_width(0.0)),
-                    )
-                    .on_click_stop(move |_| {
-                        let code_action = code_action.get_untracked();
-                        code_action.active.set(i);
-                        code_action.select();
-                    })
-                    .on_event_stop(EventListener::PointerDown, |_| {})
-                    .style(move |s| {
-                        let config = config.get();
-                        s.padding_horiz(10.0)
-                            .align_items(Some(AlignItems::Center))
-                            .min_width(0.0)
-                            .width_full()
-                            .line_height(1.8)
-                            .border_radius(6.0)
-                            .cursor(CursorStyle::Pointer)
-                            .apply_if(active.get() == i, |s| {
-                                s.background(
-                                    config.color(LapceColor::COMPLETION_CURRENT),
-                                )
-                            })
-                            .hover(move |s| {
-                                s.background(
-                                    config
-                                        .color(LapceColor::PANEL_HOVERED_BACKGROUND),
-                                )
-                            })
-                    })
-                },
-            )
-            .style(|s| s.width_full().flex_col()),
-        )
-        .style(|s| s.width_full().padding_vert(4.0)),
-    )
-    .ensure_visible(move || {
-        let config = config.get();
-        let active = active.get();
-        Size::new(1.0, config.editor.line_height() as f64)
-            .to_rect()
-            .with_origin(Point::new(
-                0.0,
-                active as f64 * config.editor.line_height() as f64,
-            ))
-    })
-    .on_resize(move |rect| {
-        code_action.update(|c| {
-            c.layout_rect = rect;
-        });
-    })
-    .on_event_stop(EventListener::PointerMove, |_| {})
-    .style(move |s| {
-        let origin = window_tab_data.code_action_origin();
-        s.display(match status.get() {
-            CodeActionStatus::Inactive => Display::None,
-            CodeActionStatus::Active => Display::Flex,
-        })
-        .position(Position::Absolute)
-        .width(400.0)
-        .max_height(400.0)
-        .margin_left(origin.x as f32)
-        .margin_top(origin.y as f32)
-        .background(config.get().color(LapceColor::COMPLETION_BACKGROUND))
-        .border_radius(6.0)
-    })
-    .debug_name("Code Action Layer")
-}
-
-fn rename(window_tab_data: Rc<WindowTabData>) -> impl View {
-    let editor = window_tab_data.rename.editor.clone();
-    let active = window_tab_data.rename.active;
-    let layout_rect = window_tab_data.rename.layout_rect;
-    let config = window_tab_data.common.config;
-
-    container(
-        container(
-            TextInputBuilder::new()
-                .is_focused(move || active.get())
-                .build_editor(editor)
-                .style(|s| s.width(150.0)),
-        )
-        .style(move |s| {
-            let config = config.get();
-            s.font_family(config.editor.font_family.clone())
-                .font_size(config.editor.font_size() as f32)
-                .border(1.0)
-                .border_radius(6.0)
-                .border_color(config.color(LapceColor::LAPCE_BORDER))
-                .background(config.color(LapceColor::EDITOR_BACKGROUND))
-        }),
-    )
-    .on_resize(move |rect| {
-        layout_rect.set(rect);
-    })
-    .on_event_stop(EventListener::PointerMove, |_| {})
-    .on_event_stop(EventListener::PointerDown, |_| {})
-    .style(move |s| {
-        let origin = window_tab_data.rename_origin();
-        s.position(Position::Absolute)
-            .apply_if(!active.get(), |s| s.hide())
-            .margin_left(origin.x as f32)
-            .margin_top(origin.y as f32)
-            .background(config.get().color(LapceColor::PANEL_BACKGROUND))
-            .border_radius(6.0)
-            .padding(6.0)
-    })
-    .debug_name("Rename Layer")
-}
-
 fn window_tab(window_tab_data: Rc<WindowTabData>) -> impl View {
     let source_control = window_tab_data.source_control.clone();
     let window_origin = window_tab_data.common.window_origin;
@@ -3365,8 +3167,6 @@ fn window_tab(window_tab_data: Rc<WindowTabData>) -> impl View {
         .debug_name("Base Layer"),
         completion(window_tab_data.clone()),
         hover(window_tab_data.clone()),
-        code_action(window_tab_data.clone()),
-        rename(window_tab_data.clone()),
         palette(window_tab_data.clone()),
         about::about_popup(window_tab_data.clone()),
         alert::alert_box(window_tab_data.alert_data.clone()),
@@ -3598,12 +3398,6 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
     };
 
     stack((
-        empty().style(move |s| {
-            let is_macos = false;
-            s.min_width(75.0)
-                .width(75.0)
-                .apply_if(!is_macos, |s| s.hide())
-        }),
         dyn_stack(
             move || {
                 let tabs = tabs.get();
@@ -3845,13 +3639,12 @@ pub fn launch() {
     #[cfg(feature = "updater")]
     crate::update::cleanup();
 
-    if let Err(err) = lapce_proxy::register_lapce_path() {
+    if let Err(err) = lapce_services::environment::register_lapce_path() {
         tracing::error!("{:?}", err);
     }
     let db = match LapceDb::new() {
         Ok(db) => Arc::new(db),
         Err(e) => {
-
             trace!(TraceLevel::ERROR, "Failed to create LapceDb: {e}");
             std::process::exit(1);
         }
@@ -4185,7 +3978,7 @@ pub fn window_menu(
 ) -> Menu {
     Menu::new("Lapce")
         .entry({
-            let mut menu = Menu::new("Lapce")
+            let menu = Menu::new("Lapce")
                 .entry(MenuItem::new("About Lapce").action(move || {
                     workbench_command.send(LapceWorkbenchCommand::ShowAbout)
                 }))
@@ -4214,25 +4007,11 @@ pub fn window_menu(
         .separator()
         .entry(
             Menu::new("File")
-                .entry(MenuItem::new("New File").action(move || {
-                    workbench_command.send(LapceWorkbenchCommand::NewFile);
-                }))
-                .separator()
                 .entry(MenuItem::new("Open").action(move || {
                     workbench_command.send(LapceWorkbenchCommand::OpenFile);
                 }))
                 .entry(MenuItem::new("Open Folder").action(move || {
                     workbench_command.send(LapceWorkbenchCommand::OpenFolder);
-                }))
-                .separator()
-                .entry(MenuItem::new("Save").action(move || {
-                    lapce_command.send(LapceCommand {
-                        kind: CommandKind::Focus(FocusCommand::Save),
-                        data: None,
-                    });
-                }))
-                .entry(MenuItem::new("Save All").action(move || {
-                    workbench_command.send(LapceWorkbenchCommand::SaveAll);
                 }))
                 .separator()
                 .entry(MenuItem::new("Close Folder").action(move || {

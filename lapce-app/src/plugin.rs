@@ -24,11 +24,11 @@ use floem::{
 };
 use indexmap::IndexMap;
 use lapce_core::{command::EditCommand, directory::Directory, mode::Mode};
-use lapce_proxy::plugin::{download_volt, volt_icon, wasi::find_all_volts};
 use lapce_rpc::{
     core::{CoreNotification, CoreRpcHandler},
     plugin::{VoltID, VoltInfo, VoltMetadata},
 };
+use lapce_services::plugin::{download_volt, find_all_volts, volt_icon};
 use lsp_types::MessageType;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -295,9 +295,10 @@ impl PluginData {
                 }
             });
             std::thread::spawn(move || {
-                let info: Option<VoltInfo> = lapce_proxy::get_url(url, None)
-                    .ok()
-                    .and_then(|r| r.json().ok());
+                let info: Option<VoltInfo> =
+                    lapce_services::http::get_url(url, None)
+                        .ok()
+                        .and_then(|r| r.json().ok());
                 send(info);
             });
         }
@@ -430,7 +431,7 @@ impl PluginData {
         let content = match cache_content {
             Some(content) => content,
             None => {
-                let resp = lapce_proxy::get_url(&url, None)?;
+                let resp = lapce_services::http::get_url(&url, None)?;
                 if !resp.status().is_success() {
                     return Err(anyhow::anyhow!("can't download icon"));
                 }
@@ -457,7 +458,7 @@ impl PluginData {
             "https://plugins.lapce.dev/api/v1/plugins/{}/{}/{}/readme",
             volt.author, volt.name, volt.version
         );
-        let resp = lapce_proxy::get_url(&url, None)?;
+        let resp = lapce_services::http::get_url(&url, None)?;
         if resp.status() != 200 {
             let text = parse_markdown("Plugin doesn't have a README", 2.0, config);
             return Ok(text);
@@ -471,7 +472,7 @@ impl PluginData {
         let url = format!(
             "https://plugins.lapce.dev/api/v1/plugins?q={query}&offset={offset}"
         );
-        let plugins: VoltsInfo = lapce_proxy::get_url(url, None)?.json()?;
+        let plugins: VoltsInfo = lapce_services::http::get_url(url, None)?.json()?;
         Ok(plugins)
     }
 

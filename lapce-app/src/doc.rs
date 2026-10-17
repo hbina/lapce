@@ -1,21 +1,19 @@
+use crate::command::InternalCommand;
 use std::{
     borrow::Cow,
     cell::RefCell,
-    cmp::Ordering,
     collections::HashMap,
     ops::Range,
-    path::{Path, PathBuf},
+    path::PathBuf,
     rc::Rc,
     sync::{
         Arc,
-        atomic::{self, AtomicUsize},
+        atomic::{self},
     },
-    time::Duration,
 };
 
 use floem::{
     ViewId,
-    action::exec_after,
     ext_event::create_ext_action,
     keyboard::Modifiers,
     peniko::Color,
@@ -44,13 +42,11 @@ use lapce_core::{
     char_buffer::CharBuffer,
     command::EditCommand,
     cursor::{Cursor, CursorAffinity},
-    editor::{Action, EditConf, EditType},
-    indent::IndentStyle,
+    editor::{EditConf, EditType},
     language::LapceLanguage,
     line_ending::LineEnding,
     mode::MotionMode,
     register::Register,
-    rope_text_pos::RopeTextPosition,
     selection::{InsertDrift, Selection},
     style::line_styles,
     syntax::{BracketParser, Syntax, edit::SyntaxEdit},
@@ -58,18 +54,11 @@ use lapce_core::{
 };
 use lapce_rpc::{
     buffer::BufferId,
-    plugin::PluginId,
     proxy::ProxyResponse,
     style::{LineStyle, LineStyles, Style},
 };
-use lapce_xi_rope::{
-    Interval, Rope, RopeDelta, Transformer,
-    spans::{Spans, SpansBuilder},
-};
-use lsp_types::{
-    CodeActionOrCommand, CodeLens, Diagnostic, DiagnosticSeverity,
-    DocumentSymbolResponse, InlayHint, InlayHintLabel, TextEdit,
-};
+use lapce_xi_rope::{Rope, RopeDelta, Transformer, spans::Spans};
+use lsp_types::{DiagnosticSeverity, InlayHint, InlayHintLabel, TextEdit};
 use serde::{Deserialize, Serialize};
 use smallvec::SmallVec;
 
@@ -89,64 +78,11 @@ use crate::{
     workspace::LapceWorkspace,
 };
 
-#[derive(Clone, Debug)]
-pub struct DiagnosticData {
-    pub expanded: RwSignal<bool>,
-    pub diagnostics: RwSignal<im::Vector<Diagnostic>>,
-    pub diagnostics_span: RwSignal<Spans<Diagnostic>>,
-}
+pub mod diagnostics;
+pub use diagnostics::DiagnosticData;
+pub use lapce_engine::diagnostics::EditorDiagnostic;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct EditorDiagnostic {
-    pub range: Option<(usize, usize)>,
-    pub diagnostic: Diagnostic,
-}
-
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub struct DocHistory {
-    pub path: PathBuf,
-    pub version: String,
-}
-
-#[derive(Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
-pub enum DocContent {
-    /// A file at some location. This can be a remote path.
-    File { path: PathBuf, read_only: bool },
-    /// A local document, which doesn't need to be sync to the disk.
-    Local,
-    /// A document of an old version in the source control
-    History(DocHistory),
-    /// A new file which doesn't exist in the file system
-    Scratch { id: BufferId, name: String },
-}
-
-impl DocContent {
-    pub fn is_local(&self) -> bool {
-        matches!(self, DocContent::Local)
-    }
-
-    pub fn is_file(&self) -> bool {
-        matches!(self, DocContent::File { .. })
-    }
-
-    pub fn read_only(&self) -> bool {
-        match self {
-            DocContent::File { read_only, .. } => *read_only,
-            DocContent::Local => false,
-            DocContent::History(_) => true,
-            DocContent::Scratch { .. } => false,
-        }
-    }
-
-    pub fn path(&self) -> Option<&PathBuf> {
-        match self {
-            DocContent::File { path, .. } => Some(path),
-            DocContent::Local => None,
-            DocContent::History(_) => None,
-            DocContent::Scratch { .. } => None,
-        }
-    }
-}
+pub use lapce_engine::document::{DocContent, DocHistory};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DocInfo {
@@ -156,69 +92,43 @@ pub struct DocInfo {
     pub cursor_offset: usize,
 }
 
-/// (Offset -> (Plugin the code actions are from, Code Actions))
-pub type CodeActions =
-    im::HashMap<usize, (PluginId, im::Vector<CodeActionOrCommand>)>;
-
-pub type AllCodeLens = im::HashMap<usize, (PluginId, usize, im::Vector<CodeLens>)>;
-
 #[derive(Clone, Debug)]
 enum DocumentHighlightsStatus {
     Ready,
     Busy(usize),
 }
 
-pub struct DocumentHighlight {
-    pub start: usize,
-    pub end: usize,
-    // lsp_type::DocumentHighlight has kind, but it's not used now
-}
+pub use lapce_engine::annotations::DocumentHighlight;
 
-impl From<&DocumentHighlight> for lapce_core::selection::SelRegion {
-    fn from(value: &DocumentHighlight) -> Self {
-        Self {
-            start: value.start,
-            end: value.end,
-            horiz: None,
-        }
-    }
-}
-
-impl DocumentHighlight {
-    pub fn find_for_offset(
-        list: &[DocumentHighlight],
-        offset: usize,
-    ) -> Option<usize> {
-        list.binary_search_by(|highlight| {
-            if highlight.start > offset {
-                Ordering::Greater
-            } else if highlight.end < offset {
-                Ordering::Less
-            } else {
-                Ordering::Equal
-            }
-        })
-        .ok()
-    }
-
-    pub fn sort(list: &mut [DocumentHighlight]) {
-        list.sort_by(|lhs, rhs| lhs.start.cmp(&rhs.start));
-    }
-}
+pub mod model;
+use model::{DocumentField, DocumentModel};
 
 #[derive(Clone)]
 pub struct Doc {
     pub scope: Scope,
     pub buffer_id: BufferId,
-    pub content: RwSignal<DocContent>,
+    pub content: DocumentField<DocContent>,
     pub cache_rev: RwSignal<u64>,
     /// Whether the buffer's content has been loaded/initialized into the buffer.
-    pub loaded: RwSignal<bool>,
-    pub buffer: RwSignal<Buffer>,
-    pub syntax: RwSignal<Syntax>,
+    pub loaded: DocumentField<bool>,
+    pub load_error: DocumentField<Option<String>>,
+    synchronization: DocumentField<Option<lapce_engine::sync::DocumentSync>>,
+    operation_actions:
+        Rc<RefCell<HashMap<u64, Box<dyn FnOnce(Result<(), String>)>>>>,
+    request_actions: Rc<
+        RefCell<
+            HashMap<
+                u64,
+                Box<dyn FnOnce(Result<ProxyResponse, lapce_rpc::RpcError>)>,
+            >,
+        >,
+    >,
+    pub buffer: DocumentField<Buffer>,
+    pub syntax: DocumentField<Syntax>,
+    model: DocumentModel,
     semantic_styles: RwSignal<Option<Spans<Style>>>,
     /// Inlay hints for the document
-    pub inlay_hints: RwSignal<Option<Spans<InlayHint>>>,
+    pub inlay_hints: DocumentField<Option<Spans<InlayHint>>>,
     /// Current completion lens text, if any.
     /// This will be displayed even on views that are not focused.
     pub completion_lens: RwSignal<Option<String>>,
@@ -230,11 +140,6 @@ pub struct Doc {
     pub inline_completion: RwSignal<Option<String>>,
     /// (line, col)
     pub inline_completion_pos: RwSignal<(usize, usize)>,
-
-    /// (Offset -> (Plugin the code actions are from, Code Actions))
-    pub code_actions: RwSignal<CodeActions>,
-
-    pub code_lens: RwSignal<AllCodeLens>,
 
     pub folding_ranges: RwSignal<FoldingRanges>,
 
@@ -272,13 +177,20 @@ impl Doc {
         editors: Editors,
         common: Rc<CommonData>,
     ) -> Self {
-        let syntax = Syntax::init(&path);
+        let model = DocumentModel::new(
+            cx,
+            lapce_engine::document::Document::empty(DocContent::File {
+                path,
+                read_only: true,
+            }),
+        );
         let config = common.config.get_untracked();
         Doc {
             scope: cx,
-            buffer_id: BufferId::next(),
-            buffer: cx.create_rw_signal(Buffer::new("")),
-            syntax: cx.create_rw_signal(syntax),
+            buffer_id: model.id(),
+            buffer: model.buffer(),
+            syntax: model.syntax(),
+            model,
             line_styles: Rc::new(RefCell::new(HashMap::new())),
             parser: Rc::new(RefCell::new(BracketParser::new(
                 String::new(),
@@ -286,27 +198,26 @@ impl Doc {
                 config.editor.bracket_colorization_limit,
             ))),
             semantic_styles: cx.create_rw_signal(None),
-            inlay_hints: cx.create_rw_signal(None),
+            inlay_hints: model.inlay_hints(),
             diagnostics,
             completion_lens: cx.create_rw_signal(None),
             completion_pos: cx.create_rw_signal((0, 0)),
             inline_completion: cx.create_rw_signal(None),
             inline_completion_pos: cx.create_rw_signal((0, 0)),
             cache_rev: cx.create_rw_signal(0),
-            content: cx.create_rw_signal(DocContent::File {
-                path,
-                read_only: false,
-            }),
-            loaded: cx.create_rw_signal(false),
+            content: model.content(),
+            loaded: model.loaded(),
+            load_error: model.load_error(),
+            synchronization: model.synchronization(),
+            operation_actions: Rc::new(RefCell::new(HashMap::new())),
+            request_actions: Rc::new(RefCell::new(HashMap::new())),
             histories: cx.create_rw_signal(im::HashMap::new()),
             head_changes: cx.create_rw_signal(im::Vector::new()),
             sticky_headers: Rc::new(RefCell::new(HashMap::new())),
-            code_actions: cx.create_rw_signal(im::HashMap::new()),
             find_result: FindResult::new(cx),
             preedit: PreeditData::new(cx),
             editors,
             common,
-            code_lens: cx.create_rw_signal(im::HashMap::new()),
             document_symbol_data: cx.create_rw_signal(None),
             folding_ranges: cx.create_rw_signal(FoldingRanges::default()),
             get_highlights_status: cx
@@ -326,12 +237,15 @@ impl Doc {
         common: Rc<CommonData>,
     ) -> Doc {
         let cx = cx.create_child();
+        let model =
+            DocumentModel::new(cx, lapce_engine::document::Document::empty(content));
         let config = common.config.get_untracked();
         Self {
             scope: cx,
-            buffer_id: BufferId::next(),
-            buffer: cx.create_rw_signal(Buffer::new("")),
-            syntax: cx.create_rw_signal(Syntax::plaintext()),
+            buffer_id: model.id(),
+            buffer: model.buffer(),
+            syntax: model.syntax(),
+            model,
             line_styles: Rc::new(RefCell::new(HashMap::new())),
             parser: Rc::new(RefCell::new(BracketParser::new(
                 String::new(),
@@ -339,28 +253,26 @@ impl Doc {
                 config.editor.bracket_colorization_limit,
             ))),
             semantic_styles: cx.create_rw_signal(None),
-            inlay_hints: cx.create_rw_signal(None),
-            diagnostics: DiagnosticData {
-                expanded: cx.create_rw_signal(true),
-                diagnostics: cx.create_rw_signal(im::Vector::new()),
-                diagnostics_span: cx.create_rw_signal(SpansBuilder::new(0).build()),
-            },
+            inlay_hints: model.inlay_hints(),
+            diagnostics: DiagnosticData::new(cx),
             completion_lens: cx.create_rw_signal(None),
             completion_pos: cx.create_rw_signal((0, 0)),
             inline_completion: cx.create_rw_signal(None),
             inline_completion_pos: cx.create_rw_signal((0, 0)),
             cache_rev: cx.create_rw_signal(0),
-            content: cx.create_rw_signal(content),
+            content: model.content(),
             histories: cx.create_rw_signal(im::HashMap::new()),
             head_changes: cx.create_rw_signal(im::Vector::new()),
             sticky_headers: Rc::new(RefCell::new(HashMap::new())),
-            loaded: cx.create_rw_signal(true),
+            loaded: model.loaded(),
+            load_error: model.load_error(),
+            synchronization: model.synchronization(),
+            operation_actions: Rc::new(RefCell::new(HashMap::new())),
+            request_actions: Rc::new(RefCell::new(HashMap::new())),
             find_result: FindResult::new(cx),
-            code_actions: cx.create_rw_signal(im::HashMap::new()),
             preedit: PreeditData::new(cx),
             editors,
             common,
-            code_lens: cx.create_rw_signal(im::HashMap::new()),
             document_symbol_data: cx.create_rw_signal(None),
             folding_ranges: cx.create_rw_signal(FoldingRanges::default()),
             get_highlights_status: cx
@@ -376,16 +288,14 @@ impl Doc {
         common: Rc<CommonData>,
     ) -> Doc {
         let config = common.config.get_untracked();
-        let syntax = if let DocContent::History(history) = &content {
-            Syntax::init(&history.path)
-        } else {
-            Syntax::plaintext()
-        };
+        let model =
+            DocumentModel::new(cx, lapce_engine::document::Document::empty(content));
         Self {
             scope: cx,
-            buffer_id: BufferId::next(),
-            buffer: cx.create_rw_signal(Buffer::new("")),
-            syntax: cx.create_rw_signal(syntax),
+            buffer_id: model.id(),
+            buffer: model.buffer(),
+            syntax: model.syntax(),
+            model,
             line_styles: Rc::new(RefCell::new(HashMap::new())),
             parser: Rc::new(RefCell::new(BracketParser::new(
                 String::new(),
@@ -393,28 +303,26 @@ impl Doc {
                 config.editor.bracket_colorization_limit,
             ))),
             semantic_styles: cx.create_rw_signal(None),
-            inlay_hints: cx.create_rw_signal(None),
-            diagnostics: DiagnosticData {
-                expanded: cx.create_rw_signal(true),
-                diagnostics: cx.create_rw_signal(im::Vector::new()),
-                diagnostics_span: cx.create_rw_signal(SpansBuilder::new(0).build()),
-            },
+            inlay_hints: model.inlay_hints(),
+            diagnostics: DiagnosticData::new(cx),
             completion_lens: cx.create_rw_signal(None),
             completion_pos: cx.create_rw_signal((0, 0)),
             inline_completion: cx.create_rw_signal(None),
             inline_completion_pos: cx.create_rw_signal((0, 0)),
             cache_rev: cx.create_rw_signal(0),
-            content: cx.create_rw_signal(content),
+            content: model.content(),
             sticky_headers: Rc::new(RefCell::new(HashMap::new())),
-            loaded: cx.create_rw_signal(true),
+            loaded: model.loaded(),
+            load_error: model.load_error(),
+            synchronization: model.synchronization(),
+            operation_actions: Rc::new(RefCell::new(HashMap::new())),
+            request_actions: Rc::new(RefCell::new(HashMap::new())),
             histories: cx.create_rw_signal(im::HashMap::new()),
             head_changes: cx.create_rw_signal(im::Vector::new()),
-            code_actions: cx.create_rw_signal(im::HashMap::new()),
             find_result: FindResult::new(cx),
             preedit: PreeditData::new(cx),
             editors,
             common,
-            code_lens: cx.create_rw_signal(im::HashMap::new()),
             document_symbol_data: cx.create_rw_signal(None),
             folding_ranges: cx.create_rw_signal(FoldingRanges::default()),
             get_highlights_status: cx
@@ -468,13 +376,13 @@ impl Doc {
         self.editors.editor_untracked(id)
     }
 
-    pub fn syntax(&self) -> ReadSignal<Syntax> {
-        self.syntax.read_only()
+    pub fn syntax(&self) -> DocumentField<Syntax> {
+        self.syntax
     }
 
     pub fn set_syntax(&self, syntax: Syntax) {
         batch(|| {
-            self.syntax.set(syntax);
+            self.model.set_syntax(syntax);
             if self.semantic_styles.with_untracked(|s| s.is_none()) {
                 self.clear_style_cache();
             }
@@ -484,14 +392,40 @@ impl Doc {
 
     /// Set the syntax highlighting this document should use.
     pub fn set_language(&self, language: LapceLanguage) {
-        self.syntax.set(Syntax::from_language(language));
+        self.set_syntax(Syntax::from_language(language));
     }
 
     pub fn find(&self) -> &Find {
         &self.common.find
     }
 
-    /// Whether or not the underlying buffer is loaded
+    /// Capture a headless opening attempt for this document.
+    pub fn opening(&self) -> Option<lapce_engine::open::SessionOpening> {
+        self.model.opening()
+    }
+
+    pub fn fail_loading(&self, message: String) {
+        self.model.fail_loading(message);
+    }
+
+    pub fn finish_opening(
+        &self,
+        opening: lapce_engine::open::SessionOpening,
+        response: Result<ProxyResponse, lapce_rpc::RpcError>,
+    ) -> Option<Result<(), lapce_rpc::RpcError>> {
+        batch(|| {
+            let result = self.model.finish_opening(opening, response);
+            if matches!(&result, Some(Ok(()))) {
+                self.on_update(None);
+                self.init_parser();
+                self.init_diagnostics();
+                self.retrieve_head();
+            }
+            result
+        })
+    }
+
+    /// Whether the underlying buffer is loaded.
     pub fn loaded(&self) -> bool {
         self.loaded.get_untracked()
     }
@@ -499,15 +433,7 @@ impl Doc {
     //// Initialize the content with some text, this marks the document as loaded.
     pub fn init_content(&self, content: Rope) {
         batch(|| {
-            self.syntax.with_untracked(|syntax| {
-                self.buffer.update(|buffer| {
-                    buffer.init_content(content);
-                    buffer.detect_indent(|| {
-                        IndentStyle::from_str(syntax.language.indent_unit())
-                    });
-                });
-            });
-            self.loaded.set(true);
+            self.model.update_buffer(|document| document.load(content));
             self.on_update(None);
             self.init_parser();
             self.init_diagnostics();
@@ -537,18 +463,17 @@ impl Doc {
     /// Reload the document's content, and is what you should typically use when you want to *set*
     /// an existing document's content.
     pub fn reload(&self, content: Rope, set_pristine: bool) {
-        // self.code_actions.clear();
         // self.inlay_hints = None;
         let delta = self
-            .buffer
-            .try_update(|buffer| buffer.reload(content, set_pristine))
+            .model
+            .update_buffer(|document| document.reload(content, set_pristine))
             .unwrap();
         self.apply_deltas(&[delta]);
     }
 
     pub fn handle_file_changed(&self, content: Rope) {
-        if self.is_pristine() {
-            self.reload(content, true);
+        if let Some(delta) = self.model.reload_from_disk(content) {
+            self.apply_deltas(&[delta]);
         }
     }
 
@@ -562,28 +487,17 @@ impl Doc {
             return Vec::new();
         }
 
-        let old_cursor = cursor.mode.clone();
-        let deltas = self.syntax.with_untracked(|syntax| {
-            self.buffer
-                .try_update(|buffer| {
-                    Action::insert(
-                        cursor,
-                        buffer,
-                        s,
-                        &|buffer, c, offset| {
-                            syntax_prev_unmatched(buffer, syntax, c, offset)
-                        },
-                        config.editor.auto_closing_matching_pairs,
-                        config.editor.auto_surround,
-                    )
-                })
-                .unwrap()
-        });
-        // Keep track of the change in the cursor mode for undo/redo
-        self.buffer.update(|buffer| {
-            buffer.set_cursor_before(old_cursor);
-            buffer.set_cursor_after(cursor.mode.clone());
-        });
+        let deltas = self
+            .model
+            .update_buffer(|document| {
+                document.insert(
+                    cursor,
+                    s,
+                    config.editor.auto_closing_matching_pairs,
+                    config.editor.auto_surround,
+                )
+            })
+            .unwrap();
         self.apply_deltas(&deltas);
         deltas
     }
@@ -598,9 +512,9 @@ impl Doc {
         }
 
         let (text, delta, inval_lines) = self
-            .buffer
-            .try_update(|buffer| buffer.edit(edits, edit_type))
-            .unwrap();
+            .model
+            .update_buffer(|document| document.raw_edit(edits, edit_type))
+            .flatten()?;
         self.apply_deltas(&[(text.clone(), delta.clone(), inval_lines.clone())]);
         Some((text, delta, inval_lines))
     }
@@ -620,33 +534,26 @@ impl Doc {
         }
 
         let mut clipboard = SystemClipboard::new();
-        let old_cursor = cursor.mode.clone();
-        let deltas = self.syntax.with_untracked(|syntax| {
-            self.buffer
-                .try_update(|buffer| {
-                    Action::do_edit(
-                        cursor,
-                        buffer,
-                        cmd,
-                        &mut clipboard,
-                        register,
-                        EditConf {
-                            comment_token: syntax.language.comment_token(),
-                            modal,
-                            smart_tab,
-                            keep_indent: true,
-                            auto_indent: true,
-                        },
-                    )
-                })
-                .unwrap()
-        });
-
+        let deltas = self
+            .model
+            .update_buffer(|document| {
+                let comment_token = document.syntax.language.comment_token();
+                document.edit_command(
+                    cursor,
+                    cmd,
+                    &mut clipboard,
+                    register,
+                    EditConf {
+                        comment_token,
+                        modal,
+                        smart_tab,
+                        keep_indent: true,
+                        auto_indent: true,
+                    },
+                )
+            })
+            .unwrap();
         if !deltas.is_empty() {
-            self.buffer.update(|buffer| {
-                buffer.set_cursor_before(old_cursor);
-                buffer.set_cursor_after(cursor.mode.clone());
-            });
             self.apply_deltas(&deltas);
         }
 
@@ -654,39 +561,33 @@ impl Doc {
     }
 
     pub fn apply_deltas(&self, deltas: &[(Rope, RopeDelta, InvalLines)]) {
-        let rev = self.rev() - deltas.len() as u64;
         batch(|| {
-            for (i, (_, delta, inval)) in deltas.iter().enumerate() {
+            for (before, delta, _inval) in deltas {
                 self.update_styles(delta);
-                self.update_inlay_hints(delta);
                 self.update_diagnostics(delta);
-                self.update_completion_lens(delta);
+                self.update_completion_lens(before, delta);
                 self.update_find_result(delta);
-                if let DocContent::File { path, .. } = self.content.get_untracked() {
-                    self.update_breakpoints(delta, &path, &inval.old_text);
-                    self.common.proxy.update(
-                        path,
-                        delta.clone(),
-                        rev + i as u64 + 1,
-                    );
-                }
+            }
+            if !self.model.synchronize_edits(deltas) {
+                self.common.internal_command.send(InternalCommand::ShowAlert {
+                    title: "Document is not connected".into(),
+                    msg: "Local edits are preserved, but the backend document is not available for updates.".into(),
+                    buttons: Vec::new(),
+                });
             }
         });
 
-        // TODO(minor): We could avoid this potential allocation since most apply_delta callers are actually using a Vec
-        // which we could reuse.
-        // We use a smallvec because there is unlikely to be more than a couple of deltas
-        let edits: SmallVec<[SyntaxEdit; 3]> = deltas
-            .iter()
-            .map(|(before_text, delta, _)| {
-                SyntaxEdit::from_delta(before_text, delta.clone())
-            })
-            .collect();
+        self.dispatch_sync();
+        let edits = lapce_engine::syntax::edits_from_deltas(deltas);
         self.on_update(Some(edits));
     }
 
     pub fn is_pristine(&self) -> bool {
-        self.buffer.with_untracked(|b| b.is_pristine())
+        self.model.is_pristine(false)
+    }
+
+    pub fn is_pristine_tracked(&self) -> bool {
+        self.model.is_pristine(true)
     }
 
     /// Get the buffer's current revision. This is used to track whether the buffer has changed.
@@ -701,18 +602,15 @@ impl Doc {
         self.buffer.with_untracked(|b| b.line_ending())
     }
 
-    fn on_update(&self, edits: Option<SmallVec<[SyntaxEdit; 3]>>) {
+    fn on_update(&self, edits: Option<Vec<SyntaxEdit>>) {
         batch(|| {
             self.trigger_syntax_change(edits);
             self.trigger_head_change();
-            self.check_auto_save();
             self.get_inlay_hints();
             self.find_result.reset();
             self.get_semantic_styles();
             self.do_bracket_colorization();
-            self.clear_code_actions();
             self.clear_style_cache();
-            self.get_code_lens();
             self.get_document_symbol();
             self.get_folding_range();
         });
@@ -739,70 +637,12 @@ impl Doc {
     }
 
     pub fn do_text_edit(&self, edits: &[TextEdit]) {
-        let edits = self.buffer.with_untracked(|buffer| {
-            edits
-                .iter()
-                .map(|edit| {
-                    let selection = lapce_core::selection::Selection::region(
-                        buffer.offset_of_position(&edit.range.start),
-                        buffer.offset_of_position(&edit.range.end),
-                    );
-                    (selection, edit.new_text.as_str())
-                })
-                .collect::<Vec<_>>()
-        });
-        self.do_raw_edit(&edits, EditType::Completion);
-    }
-
-    fn check_auto_save(&self) {
-        let config = self.common.config.get_untracked();
-        if config.editor.autosave_interval > 0 {
-            let Some(path) = self.content.with_untracked(|c| c.path().cloned())
-            else {
-                return;
-            };
-            let rev = self.rev();
-            let doc = self.clone();
-            let scope = self.scope;
-            let proxy = self.common.proxy.clone();
-            let format = config.editor.format_on_save;
-            exec_after(
-                Duration::from_millis(config.editor.autosave_interval),
-                move |_| {
-                    let current_rev = match doc
-                        .buffer
-                        .try_with_untracked(|b| b.as_ref().map(|b| b.rev()))
-                    {
-                        Some(rev) => rev,
-                        None => return,
-                    };
-
-                    if current_rev != rev || doc.is_pristine() {
-                        return;
-                    }
-
-                    if format {
-                        let send = create_ext_action(scope, move |result| {
-                            let current_rev = doc.rev();
-                            if current_rev != rev {
-                                return;
-                            }
-                            if let Ok(ProxyResponse::GetDocumentFormatting {
-                                edits,
-                            }) = result
-                            {
-                                doc.do_text_edit(&edits);
-                            }
-                            doc.save(|| {});
-                        });
-                        proxy.get_document_formatting(path, move |result| {
-                            send(result);
-                        });
-                    } else {
-                        doc.save(|| {});
-                    }
-                },
-            );
+        if let Some(delta) = self
+            .model
+            .update_buffer(|document| document.apply_text_edits(edits))
+            .flatten()
+        {
+            self.apply_deltas(&[delta]);
         }
     }
 
@@ -824,49 +664,29 @@ impl Doc {
         });
     }
 
-    /// Update the inlay hints so their positions are correct after an edit.
-    fn update_inlay_hints(&self, delta: &RopeDelta) {
-        self.inlay_hints.update(|inlay_hints| {
-            if let Some(hints) = inlay_hints.as_mut() {
-                hints.apply_shape(delta);
-            }
-        });
-    }
-
-    pub fn trigger_syntax_change(&self, edits: Option<SmallVec<[SyntaxEdit; 3]>>) {
-        let (rev, text) =
-            self.buffer.with_untracked(|b| (b.rev(), b.text().clone()));
-
+    /// Schedule a syntax parse of the current document revision.
+    pub fn trigger_syntax_change(&self, edits: Option<Vec<SyntaxEdit>>) {
+        let Some(job) = self.model.syntax_job(edits) else {
+            return;
+        };
         let doc = self.clone();
-        let send = create_ext_action(self.scope, move |syntax| {
-            if doc.buffer.with_untracked(|b| b.rev()) == rev {
-                doc.syntax.set(syntax);
+        let send = create_ext_action(self.scope, move |result| {
+            if doc.model.accept_syntax(result) {
                 doc.do_bracket_colorization();
                 doc.clear_style_cache();
                 doc.clear_sticky_headers_cache();
             }
         });
-
-        self.syntax.update(|syntax| {
-            syntax.cancel_flag.store(1, atomic::Ordering::Relaxed);
-            syntax.cancel_flag = Arc::new(AtomicUsize::new(0));
-        });
-        let mut syntax = self.syntax.get_untracked();
         rayon::spawn(move || {
-            syntax.parse(rev, text, edits.as_deref());
-            send(syntax);
+            if let Some(result) = job.run() {
+                send(result);
+            }
         });
     }
 
     fn clear_style_cache(&self) {
         self.line_styles.borrow_mut().clear();
         self.clear_text_cache();
-    }
-
-    fn clear_code_actions(&self) {
-        self.code_actions.update(|c| {
-            c.clear();
-        });
     }
 
     /// Inform any dependents on this document that they should clear any cached text.
@@ -917,20 +737,16 @@ impl Doc {
 
     /// Request semantic styles for the buffer from the LSP through the proxy.
     pub fn get_semantic_styles(&self) {
+        if !self.backend_ready() {
+            return;
+        }
         if !self.loaded() {
             return;
         }
 
-        let path =
-            if let DocContent::File { path, .. } = self.content.get_untracked() {
-                path
-            } else {
-                return;
-            };
-
-        let (atomic_rev, rev, len) = self
+        let (atomic_rev, rev, text) = self
             .buffer
-            .with_untracked(|b| (b.atomic_rev(), b.rev(), b.len()));
+            .with_untracked(|b| (b.atomic_rev(), b.rev(), b.text().clone()));
 
         let doc = self.clone();
         let send = create_ext_action(self.scope, move |styles| {
@@ -942,86 +758,32 @@ impl Doc {
             }
         });
 
-        self.common.proxy.get_semantic_tokens(path, move |result| {
-            if let Ok(ProxyResponse::GetSemanticTokens { styles }) = result {
-                if styles.styles.is_empty() {
-                    send(None);
-                    return;
-                }
-                if atomic_rev.load(atomic::Ordering::Acquire) != rev {
-                    send(None);
-                    return;
-                }
-                std::thread::spawn(move || {
-                    let mut styles_span = SpansBuilder::new(len);
-                    for style in styles.styles {
-                        if atomic_rev.load(atomic::Ordering::Acquire) != rev {
-                            send(None);
-                            return;
-                        }
-                        styles_span.add_span(
-                            Interval::new(style.start, style.end),
-                            style.style,
-                        );
-                    }
-
-                    let styles = styles_span.build();
-                    send(Some(styles));
-                });
-            } else {
-                send(None);
-            }
-        });
-    }
-
-    pub fn get_code_lens(&self) {
-        let cx = self.scope;
-        let doc = self.clone();
-        self.code_lens.update(|code_lens| {
-            code_lens.clear();
-        });
-        let rev = self.rev();
-        if let DocContent::File { path, .. } = doc.content.get_untracked() {
-            let send = create_ext_action(cx, move |result| {
-                if rev != doc.rev() {
-                    return;
-                }
-                if let Ok(ProxyResponse::GetCodeLensResponse { plugin_id, resp }) =
-                    result
-                {
-                    let Some(codelens) = resp else {
+        self.request_navigation(
+            lapce_engine::navigation::NavigationQuery::SemanticTokens,
+            move |result| {
+                if let Ok(ProxyResponse::GetSemanticTokens { styles }) = result {
+                    if atomic_rev.load(atomic::Ordering::Acquire) != rev {
+                        send(None);
                         return;
-                    };
-                    doc.code_lens.update(|code_lens| {
-                        for codelens in codelens {
-                            if codelens.command.is_none() {
-                                continue;
-                            }
-                            let entry = code_lens
-                                .entry(codelens.range.start.line as usize)
-                                .or_insert_with(|| {
-                                    (
-                                        plugin_id,
-                                        doc.buffer.with_untracked(|b| {
-                                            b.offset_of_line(
-                                                codelens.range.start.line as usize,
-                                            )
-                                        }),
-                                        im::Vector::new(),
-                                    )
-                                });
-                            entry.2.push_back(codelens);
-                        }
+                    }
+                    std::thread::spawn(move || {
+                        send(lapce_engine::annotations::semantic_spans(
+                            &text,
+                            styles.styles,
+                            || atomic_rev.load(atomic::Ordering::Acquire) != rev,
+                        ));
                     });
+                } else {
+                    send(None);
                 }
-            });
-            self.common.proxy.get_code_lens(path, move |result| {
-                send(result);
-            });
-        }
+            },
+        );
     }
 
     pub fn get_document_symbol(&self) {
+        if !self.backend_ready() {
+            return;
+        }
         let cx = self.scope;
         let doc = self.clone();
         let rev = self.rev();
@@ -1034,19 +796,16 @@ impl Doc {
                     }
                     if let Ok(ProxyResponse::GetDocumentSymbols { resp }) = result {
                         let items: Vec<RwSignal<SymbolInformationItemData>> =
-                            match resp {
-                                DocumentSymbolResponse::Flat(_symbols) => {
-                                    Vec::with_capacity(0)
-                                }
-                                DocumentSymbolResponse::Nested(symbols) => symbols
-                                    .into_iter()
-                                    .map(|x| {
-                                        cx.create_rw_signal(
-                                            SymbolInformationItemData::from((x, cx)),
-                                        )
-                                    })
-                                    .collect(),
-                            };
+                            lapce_engine::navigation::document_symbol_tree(resp)
+                                .into_iter()
+                                .map(|symbol| {
+                                    cx.create_rw_signal(
+                                        SymbolInformationItemData::from((
+                                            symbol, cx,
+                                        )),
+                                    )
+                                })
+                                .collect();
                         let symbol_new = Some(SymbolData::new(items, path, cx));
                         doc.document_symbol_data.update(|symbol| {
                             *symbol = symbol_new;
@@ -1055,28 +814,25 @@ impl Doc {
                 }
             });
 
-            self.common.proxy.get_document_symbols(path, move |result| {
-                send(result);
-            });
+            self.request_navigation(
+                lapce_engine::navigation::NavigationQuery::Symbols,
+                move |result| {
+                    send(result);
+                },
+            );
         }
     }
 
     /// Request inlay hints for the buffer from the LSP through the proxy.
     pub fn get_inlay_hints(&self) {
+        if !self.backend_ready() {
+            return;
+        }
         if !self.loaded() {
             return;
         }
 
-        let path =
-            if let DocContent::File { path, .. } = self.content.get_untracked() {
-                path
-            } else {
-                return;
-            };
-
-        let (buffer, rev, len) = self
-            .buffer
-            .with_untracked(|b| (b.clone(), b.rev(), b.len()));
+        let (buffer, rev) = self.buffer.with_untracked(|b| (b.clone(), b.rev()));
 
         let doc = self.clone();
         let send = create_ext_action(self.scope, move |hints| {
@@ -1086,25 +842,14 @@ impl Doc {
             }
         });
 
-        self.common.proxy.get_inlay_hints(path, move |result| {
-            if let Ok(ProxyResponse::GetInlayHints { mut hints }) = result {
-                // Sort the inlay hints by their position, as the LSP does not guarantee that it will
-                // provide them in the order that they are in within the file
-                // as well, Spans does not iterate in the order that they appear
-                hints.sort_by(|left, right| left.position.cmp(&right.position));
-
-                let mut hints_span = SpansBuilder::new(len);
-                for hint in hints {
-                    let offset = buffer.offset_of_position(&hint.position).min(len);
-                    hints_span.add_span(
-                        Interval::new(offset, (offset + 1).min(len)),
-                        hint,
-                    );
+        self.request_navigation(
+            lapce_engine::navigation::NavigationQuery::InlayHints,
+            move |result| {
+                if let Ok(ProxyResponse::GetInlayHints { hints }) = result {
+                    send(lapce_engine::annotations::inlay_spans(&buffer, hints));
                 }
-                let hints = hints_span.build();
-                send(hints);
-            }
-        });
+            },
+        );
     }
 
     pub fn diagnostics(&self) -> &DiagnosticData {
@@ -1113,74 +858,42 @@ impl Doc {
 
     /// Update the diagnostics' positions after an edit so that they appear in the correct place.
     fn update_diagnostics(&self, delta: &RopeDelta) {
-        if self
-            .diagnostics
-            .diagnostics
-            .with_untracked(|d| d.is_empty())
-        {
-            return;
-        }
-
-        self.diagnostics.diagnostics_span.update(|diagnostics| {
-            diagnostics.apply_shape(delta);
-        });
+        self.diagnostics.apply_delta(delta);
     }
 
     /// init diagnostics offset ranges from lsp positions
     pub fn init_diagnostics(&self) {
-        let len = self.buffer.with_untracked(|b| b.len());
-        let diagnostics = self.diagnostics.diagnostics.get_untracked();
+        let (text, revision) = self
+            .buffer
+            .with_untracked(|buffer| (buffer.text().clone(), buffer.rev()));
+        self.diagnostics.bind(&text, revision);
+        self.on_diagnostics_changed();
+    }
 
-        let span = self.buffer.with_untracked(|buffer| {
-            let mut span = SpansBuilder::new(len);
-            for diag in diagnostics.iter() {
-                let start = buffer.offset_of_position(&diag.range.start);
-                let end = buffer.offset_of_position(&diag.range.end);
-                span.add_span(Interval::new(start, end), diag.to_owned());
-            }
-            span.build()
-        });
-        self.diagnostics.diagnostics_span.set(span);
-
+    pub(crate) fn on_diagnostics_changed(&self) {
         self.clear_text_cache();
-        self.clear_code_actions();
     }
 
     pub fn get_folding_range(&self) {
-        // let cx = self.scope;
-        // let doc = self.clone();
-        // let rev = self.rev();
-        // if let DocContent::File { path, .. } = doc.content.get_untracked() {
-        //     let send = create_ext_action(cx, {
-        //         move |result| {
-        //             if rev != doc.rev() {
-        //                 return;
-        //             }
-        //             if let Ok(ProxyResponse::LspFoldingRangeResponse {
-        //                 resp, ..
-        //             }) = result
-        //             {
-        //                 let folding = resp
-        //                     .unwrap_or_default()
-        //                     .into_iter()
-        //                     .map(|x| {
-        //                         crate::editor::gutter::FoldingRange::from_lsp(x)
-        //                     })
-        //                     .sorted_by(|x, y| x.start.line.cmp(&y.start.line))
-        //                     .collect();
-        //                 doc.folding_ranges.update(|symbol| {
-        //                     symbol.0 = folding;
-        //                 });
-        //             }
-        //         }
-        //     });
-
-        //     self.common
-        //         .proxy
-        //         .get_lsp_folding_range(path, move |result| {
-        //             send(result);
-        //         });
-        // }
+        if !self.backend_ready() {
+            return;
+        }
+        let doc = self.clone();
+        let send = create_ext_action(self.scope, move |result| {
+            if let Ok(ProxyResponse::LspFoldingRangeResponse { resp, .. }) = result {
+                let mut folding: Vec<_> = resp
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(crate::editor::gutter::FoldingRange::from_lsp)
+                    .collect();
+                folding.sort_by_key(|range| range.start.line);
+                doc.folding_ranges.update(|ranges| ranges.0 = folding);
+            }
+        });
+        self.request_navigation(
+            lapce_engine::navigation::NavigationQuery::FoldingRanges,
+            move |result| send(result),
+        );
     }
 
     /// Get the current completion lens text
@@ -1208,75 +921,23 @@ impl Doc {
         }
     }
 
-    fn update_breakpoints(&self, delta: &RopeDelta, path: &Path, old_text: &Rope) {
-        if self
-            .common
-            .breakpoints
-            .with_untracked(|breakpoints| breakpoints.contains_key(path))
-        {
-            self.common.breakpoints.update(|breakpoints| {
-                if let Some(path_breakpoints) = breakpoints.get_mut(path) {
-                    let mut transformer = Transformer::new(delta);
-                    self.buffer.with_untracked(|buffer| {
-                        *path_breakpoints = path_breakpoints
-                            .clone()
-                            .into_values()
-                            .map(|mut b| {
-                                let offset = old_text.offset_of_line(b.line);
-                                let offset = transformer.transform(offset, false);
-                                let line = buffer.line_of_offset(offset);
-                                b.line = line;
-                                b.offset = offset;
-                                (b.line, b)
-                            })
-                            .collect();
-                    });
-                }
-            });
-        }
-    }
-
     /// Update the completion lens position after an edit so that it appears in the correct place.
-    pub fn update_completion_lens(&self, delta: &RopeDelta) {
+    pub fn update_completion_lens(&self, before: &Rope, delta: &RopeDelta) {
         let Some(completion) = self.completion_lens.get_untracked() else {
             return;
         };
-
-        let (line, col) = self.completion_pos.get_untracked();
-        let offset = self
-            .buffer
-            .with_untracked(|b| b.offset_of_line_col(line, col));
-
-        // If the edit is easily checkable + updateable from, then we alter the lens' text.
-        // In normal typing, if we didn't do this, then the text would jitter forward and then
-        // backwards as the completion lens is updated.
-        // TODO: this could also handle simple deletion, but we don't currently keep track of
-        // the past completion lens string content in the field.
-        if delta.as_simple_insert().is_some() {
-            let (iv, new_len) = delta.summary();
-            if iv.start() == iv.end()
-                && iv.start() == offset
-                && new_len <= completion.len()
-            {
-                // Remove the # of newly inserted characters
-                // These aren't necessarily the same as the characters literally in the
-                // text, but the completion will be updated when the completion widget
-                // receives the update event, and it will fix this if needed.
-                // TODO: this could be smarter and use the insert's content
-                self.completion_lens
-                    .set(Some(completion[new_len..].to_string()));
-            }
+        let transformed = lapce_engine::annotations::transform_completion_lens(
+            before,
+            delta,
+            self.completion_pos.get_untracked(),
+            &completion,
+        );
+        if let Some((text, position)) = transformed {
+            self.completion_lens.set(Some(text));
+            self.completion_pos.set(position);
+        } else {
+            self.clear_completion_lens();
         }
-
-        // Shift the position by the rope delta
-        let mut transformer = Transformer::new(delta);
-
-        let new_offset = transformer.transform(offset, true);
-        let new_pos = self
-            .buffer
-            .with_untracked(|b| b.offset_to_line_col(new_offset));
-
-        self.completion_pos.set(new_pos);
     }
 
     fn update_find_result(&self, delta: &RopeDelta) {
@@ -1309,42 +970,28 @@ impl Doc {
             return;
         }
 
-        let search = self.common.find.search_string.get_untracked();
-        let search = match search {
-            Some(search) => search,
-            None => return,
-        };
-        if search.content.is_empty() {
+        let (revision, text) = self
+            .buffer
+            .with_untracked(|buffer| (buffer.rev(), buffer.text().clone()));
+        let Some(job) = self.common.find.job(text, revision) else {
+            self.find_result.progress.set(FindProgress::Ready);
             return;
-        }
-
+        };
         self.find_result
             .progress
             .set(FindProgress::InProgress(Selection::new()));
-
-        let find_result = self.find_result.clone();
-        let send = create_ext_action(self.scope, move |occurrences: Selection| {
-            find_result.occurrences.set(occurrences);
-            find_result.progress.set(FindProgress::Ready);
-        });
-
-        let text = self.buffer.with_untracked(|b| b.text().clone());
-        let case_matching = self.common.find.case_matching.get_untracked();
-        let whole_words = self.common.find.whole_words.get_untracked();
-        rayon::spawn(move || {
-            let mut occurrences = Selection::new();
-            Find::find(
-                &text,
-                &search,
-                0,
-                text.len(),
-                case_matching,
-                whole_words,
-                true,
-                &mut occurrences,
-            );
-            send(occurrences);
-        });
+        let doc = self.clone();
+        let send = create_ext_action(
+            self.scope,
+            move |result: lapce_engine::search::SearchResult| {
+                if result.is_current(doc.rev(), doc.common.find.rev.get_untracked())
+                {
+                    doc.find_result.occurrences.set(result.occurrences);
+                    doc.find_result.progress.set(FindProgress::Ready);
+                }
+            },
+        );
+        rayon::spawn(move || send(job.run()));
     }
 
     /// Get the sticky headers for a particular line, creating them if necessary.
@@ -1456,27 +1103,323 @@ impl Doc {
         });
     }
 
-    pub fn save(&self, after_action: impl FnOnce() + 'static) {
-        let content = self.content.get_untracked();
-        if let DocContent::File { path, .. } = content {
-            let rev = self.rev();
-            let buffer = self.buffer;
-            let send = create_ext_action(self.scope, move |result| {
-                if let Ok(ProxyResponse::SaveResponse {}) = result {
-                    let current_rev = buffer.with_untracked(|buffer| buffer.rev());
-                    if current_rev == rev {
-                        buffer.update(|buffer| {
-                            buffer.set_pristine();
+    pub fn local_backend_version(&self, backend_version: i32) -> Option<i32> {
+        self.synchronization.with_untracked(|sync| {
+            sync.as_ref().map_or(Some(backend_version), |sync| {
+                sync.local_version(backend_version)
+            })
+        })
+    }
+    pub fn diagnostic_publication(
+        &self,
+        diagnostics: Vec<lsp_types::Diagnostic>,
+        version: Option<i32>,
+    ) -> Option<lapce_engine::diagnostics::DiagnosticPublication> {
+        self.model.diagnostic_publication(diagnostics, version)
+    }
+
+    pub fn initialize_sync(&self, remote_rev: u64) {
+        if self.model.initialize_sync(remote_rev) {
+            self.refresh_backend_annotations();
+        }
+    }
+
+    fn recover_sync(&self) {
+        let Some(path) = self
+            .content
+            .with_untracked(|content| content.path().cloned())
+        else {
+            return;
+        };
+        let doc = self.clone();
+        let send = create_ext_action(
+            self.scope,
+            move |result: Result<ProxyResponse, lapce_rpc::RpcError>| {
+                let result = result
+                    .map_err(|error: lapce_rpc::RpcError| error.message)
+                    .and_then(|snapshot| doc.model.recover_sync(snapshot));
+                if let Err(error) = result {
+                    doc.common
+                        .internal_command
+                        .send(InternalCommand::ShowAlert {
+                            title: "Document recovery failed".into(),
+                            msg: error,
+                            buttons: Vec::new(),
                         });
-                        after_action();
+                } else {
+                    doc.cancel_operation_actions(
+                        "Document synchronization was reset".into(),
+                    );
+                    doc.cancel_document_requests();
+                    doc.common.internal_command.send(InternalCommand::HideAlert);
+                    doc.dispatch_sync();
+                }
+            },
+        );
+        self.common.proxy.request_async(
+            lapce_rpc::proxy::ProxyRequest::GetBuffer { path },
+            move |result| send(result),
+        );
+    }
+
+    fn backend_ready(&self) -> bool {
+        self.model.backend_ready()
+    }
+
+    pub fn backend_disconnected(&self) {
+        self.model.backend_disconnected();
+        self.cancel_operation_actions("Backend disconnected".into());
+        self.cancel_document_requests();
+    }
+
+    fn refresh_backend_annotations(&self) {
+        self.get_inlay_hints();
+        self.get_semantic_styles();
+        self.get_document_symbol();
+        self.get_folding_range();
+    }
+
+    pub fn request_navigation(
+        &self,
+        query: lapce_engine::navigation::NavigationQuery,
+        action: impl FnOnce(Result<ProxyResponse, lapce_rpc::RpcError>) + 'static,
+    ) {
+        let plan = match self.model.navigation_plan(query) {
+            Ok(plan) => plan,
+            Err(error) => {
+                action(Err(error));
+                return;
+            }
+        };
+        let model = self.model;
+        self.request_document(plan.request(), move |response| {
+            action(model.finish_navigation(plan, response));
+        });
+    }
+
+    pub fn request_document(
+        &self,
+        request: lapce_rpc::proxy::ProxyRequest,
+        action: impl FnOnce(Result<ProxyResponse, lapce_rpc::RpcError>) + 'static,
+    ) {
+        if self.synchronization.with_untracked(|sync| {
+            sync.as_ref().is_some_and(|sync| sync.error.is_some())
+        }) {
+            action(Err(lapce_rpc::RpcError {
+                code: -32800,
+                message: "Document synchronization is paused".into(),
+            }));
+            return;
+        }
+        let rev = self.rev();
+        let id = self
+            .synchronization
+            .try_update(|sync| {
+                sync.as_mut().and_then(|sync| sync.request(request, rev))
+            })
+            .flatten();
+        if let Some(id) = id {
+            self.request_actions
+                .borrow_mut()
+                .insert(id, Box::new(action));
+            self.dispatch_sync();
+        } else {
+            action(Err(lapce_rpc::RpcError {
+                code: -32801,
+                message: "Document is not connected".into(),
+            }));
+        }
+    }
+
+    pub fn notification_document(
+        &self,
+        notification: lapce_rpc::proxy::ProxyNotification,
+    ) {
+        self.synchronization.update(|sync| {
+            if let Some(sync) = sync {
+                sync.notification(notification);
+            }
+        });
+        self.dispatch_sync();
+    }
+
+    fn cancel_operation_actions(&self, message: String) {
+        let actions = std::mem::take(&mut *self.operation_actions.borrow_mut());
+        for (_, action) in actions {
+            action(Err(message.clone()));
+        }
+    }
+
+    fn cancel_document_requests(&self) {
+        let actions = std::mem::take(&mut *self.request_actions.borrow_mut());
+        for (_, action) in actions {
+            action(Err(lapce_rpc::RpcError {
+                code: -32800,
+                message: "Document synchronization changed".into(),
+            }));
+        }
+    }
+
+    fn dispatch_sync(&self) {
+        loop {
+            let notification = self
+                .synchronization
+                .try_update(|sync| {
+                    sync.as_mut().and_then(|sync| sync.next_notification())
+                })
+                .flatten();
+            let Some(notification) = notification else {
+                break;
+            };
+            self.common.proxy.notification(notification);
+        }
+        let effect = self
+            .synchronization
+            .try_update(|sync| sync.as_mut().and_then(|sync| sync.next_effect()))
+            .flatten();
+        let Some(effect) = effect else {
+            return;
+        };
+        let detached = effect.detached;
+        let generation = self.model.backend_generation();
+        let doc = self.clone();
+        let send = create_ext_action(
+            self.scope,
+            move |response: Result<ProxyResponse, lapce_rpc::RpcError>| {
+                let Some(completion) = doc
+                    .model
+                    .acknowledge_backend(generation, effect.id, response)
+                else {
+                    return;
+                };
+                let refresh = completion.refresh_annotations;
+                // A close callback may reopen this document and register new reads.
+                // Cancel the previous owner's callbacks before invoking it.
+                if matches!(
+                    completion.outcome,
+                    lapce_engine::sync::SyncOutcome::Closed { .. }
+                ) {
+                    doc.cancel_document_requests();
+                }
+                if let Some((id, result)) = completion.request_result {
+                    let action = doc.request_actions.borrow_mut().remove(&id);
+                    if let Some(action) = action {
+                        action(result);
                     }
                 }
-            });
-
-            self.common.proxy.save(rev, path, true, move |result| {
-                send(result);
-            })
+                if let Some((id, result)) = completion.operation_result {
+                    let action = doc.operation_actions.borrow_mut().remove(&id);
+                    if let Some(action) = action {
+                        action(result);
+                    }
+                }
+                match Some(completion.outcome) {
+                    Some(lapce_engine::sync::SyncOutcome::Failed(error)) => {
+                        doc.cancel_operation_actions(error.clone());
+                        doc.cancel_document_requests();
+                        doc.common.internal_command.send(InternalCommand::ShowAlert {
+                        title: "Document synchronization failed".into(),
+                        msg: format!("{error}\nYour local edits are preserved. Resynchronizing will replace the backend's in-memory buffer with your local text; it will not save the file."),
+                        buttons: vec![crate::alert::AlertButton {
+                            text: "Resynchronize with local text".into(),
+                            action: Rc::new({ let doc = doc.clone(); move || doc.recover_sync() }),
+                        }],
+                    });
+                    }
+                    _ => {}
+                }
+                doc.dispatch_sync();
+                if refresh && doc.backend_ready() {
+                    doc.refresh_backend_annotations();
+                }
+            },
+        );
+        self.common
+            .proxy
+            .request_async(effect.request, move |response| send(response));
+        if detached {
+            self.dispatch_sync();
         }
+    }
+
+    pub fn retarget_closed(&self, path: std::path::PathBuf) -> Result<(), String> {
+        self.model.retarget_closed(path)?;
+        self.clear_style_cache();
+        self.clear_sticky_headers_cache();
+        Ok(())
+    }
+
+    pub fn mark_deleted(&self) {
+        self.model.update_buffer(|document| document.mark_deleted());
+    }
+    pub fn mark_disk_present(&self) {
+        self.model
+            .update_buffer(|document| document.mark_disk_present());
+    }
+
+    pub fn can_reopen_backend(&self) -> bool {
+        self.model.can_reopen_backend()
+    }
+
+    pub fn reopen_backend(
+        &self,
+        after_open: impl FnOnce(Result<(), String>) + 'static,
+    ) {
+        let plan = match self.model.reopen_plan() {
+            Ok(plan) => plan,
+            Err(error) => {
+                after_open(Err(error));
+                return;
+            }
+        };
+        let request = plan.request();
+        let doc = self.clone();
+        let send = create_ext_action(self.scope, move |response| {
+            let result = doc.model.finish_reopen(plan, response);
+            if result.is_ok() {
+                doc.init_parser();
+                doc.init_diagnostics();
+                doc.trigger_syntax_change(None);
+                doc.clear_style_cache();
+                doc.clear_sticky_headers_cache();
+                doc.dispatch_sync();
+                if doc.backend_ready() {
+                    doc.refresh_backend_annotations();
+                }
+            }
+            after_open(result);
+        });
+        self.common
+            .proxy
+            .request_async(request, move |response| send(response));
+    }
+
+    /// Close a document after earlier mutations have been acknowledged.
+    pub fn close_backend(
+        &self,
+        after_close: impl FnOnce(Result<(), String>) + 'static,
+    ) -> bool {
+        let id = match self.model.begin_close() {
+            Ok(lapce_engine::session::DocumentClose::Local) => {
+                self.cancel_document_requests();
+                self.cancel_operation_actions("Document closed".into());
+                after_close(Ok(()));
+                return true;
+            }
+            Ok(lapce_engine::session::DocumentClose::Backend { operation_id }) => {
+                operation_id
+            }
+            Err(error) => {
+                after_close(Err(error));
+                return false;
+            }
+        };
+        self.operation_actions
+            .borrow_mut()
+            .insert(id, Box::new(after_close));
+        self.cancel_document_requests();
+        self.dispatch_sync();
+        true
     }
 
     pub fn set_inline_completion(
@@ -1541,10 +1484,6 @@ impl Doc {
         self.inline_completion_pos.set(new_pos);
     }
 
-    pub fn code_actions(&self) -> RwSignal<CodeActions> {
-        self.code_actions
-    }
-
     /// Returns the offsets of the brackets enclosing the given offset.
     /// Uses a language aware algorithm if syntax support is available for the current language,
     /// else falls back to a language unaware algorithm.
@@ -1570,12 +1509,9 @@ impl Doc {
             return;
         }
 
-        let path =
-            if let DocContent::File { path, .. } = self.content.get_untracked() {
-                path
-            } else {
-                return;
-            };
+        if !self.content.with_untracked(|content| content.is_file()) {
+            return;
+        }
 
         let cursor_in_highlight = self.highlights.with_untracked(|highlights| {
             if let Some(highlights) = highlights {
@@ -1602,9 +1538,7 @@ impl Doc {
             return;
         }
 
-        let (position, rev) = self
-            .buffer
-            .with_untracked(|b| (b.offset_to_position(offset), b.rev()));
+        let rev = self.rev();
 
         let doc = self.clone();
 
@@ -1620,16 +1554,10 @@ impl Doc {
                     }) = response
                     {
                         new_highlights = doc.buffer.with_untracked(move |buffer| {
-                            let mut result = highlights
-                                .iter()
-                                .map(|highlight| DocumentHighlight {
-                                    start: buffer
-                                        .offset_of_position(&highlight.range.start),
-                                    end: buffer
-                                        .offset_of_position(&highlight.range.end),
-                                })
-                                .collect::<Vec<_>>();
-                            DocumentHighlight::sort(&mut result);
+                            let result =
+                                lapce_engine::annotations::document_highlights(
+                                    buffer, highlights,
+                                );
 
                             // This is a kind of debouncing - if cursor moves before we got response from LSP,
                             // check if cursor is still in the region.
@@ -1647,9 +1575,10 @@ impl Doc {
                 .update(|status| *status = DocumentHighlightsStatus::Ready);
         });
 
-        self.common
-            .proxy
-            .get_document_highlights(path, position, handle_response);
+        self.request_navigation(
+            lapce_engine::navigation::NavigationQuery::Highlights { offset },
+            move |response| handle_response(response),
+        );
     }
 }
 
@@ -2014,11 +1943,10 @@ impl CommonAction for Doc {
         register: &mut Register,
     ) {
         let deltas = self
-            .buffer
-            .try_update(move |buffer| {
-                Action::execute_motion_mode(
+            .model
+            .update_buffer(move |document| {
+                document.execute_motion_mode(
                     cursor,
-                    buffer,
                     motion_mode,
                     range,
                     is_vertical,
@@ -2291,20 +2219,6 @@ impl Styling for DocStyling {
 impl std::fmt::Debug for Doc {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&format!("Document {:?}", self.buffer_id))
-    }
-}
-
-/// Get the previous unmatched character `c` from the `offset` using `syntax` if applicable
-fn syntax_prev_unmatched(
-    buffer: &Buffer,
-    syntax: &Syntax,
-    c: char,
-    offset: usize,
-) -> Option<usize> {
-    if syntax.layers.is_some() {
-        syntax.find_tag(offset, true, &CharBuffer::new(c))
-    } else {
-        WordCursor::new(buffer.text(), offset).previous_unmatched(c)
     }
 }
 

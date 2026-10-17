@@ -1,35 +1,36 @@
 use std::{path::PathBuf, rc::Rc};
 
+use crate::reactive_model::ModelField;
 use floem::{
     keyboard::Modifiers,
-    reactive::{RwSignal, Scope, SignalWith},
+    reactive::{RwSignal, SignalUpdate},
 };
 use indexmap::IndexMap;
 use lapce_core::mode::Mode;
-use lapce_rpc::source_control::FileDiff;
+use lapce_engine::workspace::WorkspaceActions;
+use lapce_rpc::source_control::{DiffInfo, FileDiff};
 
 use crate::{
-    command::{CommandExecuted, CommandKind},
-    editor::EditorData,
+    command::CommandExecuted,
     keypress::{KeyPressFocus, condition::Condition},
-    main_split::Editors,
     window_tab::CommonData,
 };
 
 #[derive(Clone, Debug)]
 pub struct SourceControlData {
-    // VCS modified files & whether they should be included in the next commit
-    pub file_diffs: RwSignal<IndexMap<PathBuf, (FileDiff, bool)>>,
-    pub branch: RwSignal<String>,
-    pub branches: RwSignal<im::Vector<String>>,
-    pub tags: RwSignal<im::Vector<String>>,
-    pub editor: EditorData,
+    // Changed files available for read-only diff navigation.
+    pub file_diffs: ModelField<WorkspaceActions, IndexMap<PathBuf, FileDiff>>,
+    pub branch: ModelField<WorkspaceActions, String>,
+    pub branches: ModelField<WorkspaceActions, im::Vector<String>>,
+    pub tags: ModelField<WorkspaceActions, im::Vector<String>>,
+    state: RwSignal<WorkspaceActions>,
+    changed: RwSignal<()>,
     pub common: Rc<CommonData>,
 }
 
 impl KeyPressFocus for SourceControlData {
     fn get_mode(&self) -> Mode {
-        Mode::Insert
+        Mode::Normal
     }
 
     fn check_condition(&self, condition: Condition) -> bool {
@@ -41,64 +42,61 @@ impl KeyPressFocus for SourceControlData {
 
     fn run_command(
         &self,
-        command: &crate::command::LapceCommand,
-        count: Option<usize>,
-        mods: Modifiers,
+        _command: &crate::command::LapceCommand,
+        _count: Option<usize>,
+        _mods: Modifiers,
     ) -> CommandExecuted {
-        match &command.kind {
-            CommandKind::Edit(_)
-            | CommandKind::Move(_)
-            | CommandKind::MultiSelection(_) => {
-                self.editor.run_command(command, count, mods)
-            }
-            _ => CommandExecuted::No,
-        }
+        CommandExecuted::No
     }
-
-    fn receive_char(&self, c: &str) {
-        self.editor.receive_char(c);
-    }
+    fn receive_char(&self, _c: &str) {}
 }
 
 impl SourceControlData {
-    pub fn new(cx: Scope, editors: Editors, common: Rc<CommonData>) -> Self {
+    pub fn new(common: Rc<CommonData>) -> Self {
+        let state = common.workspace_actions;
+        let changed = common.workspace_changed;
         Self {
-            file_diffs: cx.create_rw_signal(IndexMap::new()),
-            branch: cx.create_rw_signal("".to_string()),
-            branches: cx.create_rw_signal(im::Vector::new()),
-            tags: cx.create_rw_signal(im::Vector::new()),
-            editor: editors.make_local(cx, common.clone()),
+            state,
+            changed,
+            file_diffs: ModelField::new(
+                state,
+                changed,
+                |state| &state.source_control.file_diffs,
+                |state| &mut state.source_control.file_diffs,
+                None,
+            ),
+            branch: ModelField::new(
+                state,
+                changed,
+                |state| &state.source_control.branch,
+                |state| &mut state.source_control.branch,
+                None,
+            ),
+            branches: ModelField::new(
+                state,
+                changed,
+                |state| &state.source_control.branches,
+                |state| &mut state.source_control.branches,
+                None,
+            ),
+            tags: ModelField::new(
+                state,
+                changed,
+                |state| &state.source_control.tags,
+                |state| &mut state.source_control.tags,
+                None,
+            ),
             common,
         }
     }
 
-    pub fn commit(&self) {
-        let diffs: Vec<FileDiff> = self.file_diffs.with_untracked(|file_diffs| {
-            file_diffs
-                .iter()
-                .filter_map(
-                    |(_, (diff, checked))| {
-                        if *checked { Some(diff) } else { None }
-                    },
-                )
-                .cloned()
-                .collect()
-        });
-        if diffs.is_empty() {
-            return;
+    pub fn apply_diff(&self, diff: &DiffInfo) {
+        if self
+            .state
+            .try_update(|state| state.source_control.apply_diff(diff))
+            .is_some()
+        {
+            self.changed.set(());
         }
-
-        let message = self
-            .editor
-            .doc()
-            .buffer
-            .with_untracked(|buffer| buffer.to_string());
-        let message = message.trim();
-        if message.is_empty() {
-            return;
-        }
-
-        self.editor.reset();
-        self.common.proxy.git_commit(message.to_string(), diffs);
     }
 }

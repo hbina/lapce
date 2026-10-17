@@ -20,6 +20,22 @@ use crate::{
 
 pub type PanelOrder = im::HashMap<PanelPosition, im::Vector<PanelKind>>;
 
+fn browser_panel_order(panels: PanelOrder) -> PanelOrder {
+    // Keep the legacy enum solely to deserialize older saved layouts.
+    panels
+        .into_iter()
+        .map(|(position, panels)| {
+            (
+                position,
+                panels
+                    .into_iter()
+                    .filter(|kind| *kind != PanelKind::Debug)
+                    .collect(),
+            )
+        })
+        .collect()
+}
+
 pub fn default_panel_order() -> PanelOrder {
     let mut order = PanelOrder::new();
     order.insert(
@@ -28,7 +44,6 @@ pub fn default_panel_order() -> PanelOrder {
             PanelKind::FileExplorer,
             PanelKind::Plugin,
             PanelKind::SourceControl,
-            PanelKind::Debug,
         ],
     );
     order.insert(
@@ -101,6 +116,7 @@ impl PanelData {
         sections: im::HashMap<PanelSection, bool>,
         common: Rc<CommonData>,
     ) -> Self {
+        let panels = browser_panel_order(panels);
         let panels = cx.create_rw_signal(panels);
 
         let mut styles = im::HashMap::new();
@@ -282,7 +298,7 @@ impl PanelData {
         }
     }
 
-    /// Get the active panel kind at that position, if any.  
+    /// Get the active panel kind at that position, if any.
     /// `tracked` decides whether it should track the signal or not.
     pub fn active_panel_at_position(
         &self,
@@ -461,4 +477,38 @@ pub fn panel_position(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod code_browser_tests {
+    use super::*;
+
+    #[test]
+    fn old_debug_layouts_keep_other_panels_in_order() {
+        let legacy: im::Vector<PanelKind> = serde_json::from_str(
+            r#"["FileExplorer","Debug","SourceControl","Search"]"#,
+        )
+        .unwrap();
+        let migrated = browser_panel_order(im::HashMap::from_iter([
+            (PanelPosition::LeftTop, legacy),
+            (PanelPosition::BottomLeft, im::vector![PanelKind::Problem]),
+        ]));
+        assert_eq!(
+            migrated[&PanelPosition::LeftTop],
+            im::vector![
+                PanelKind::FileExplorer,
+                PanelKind::SourceControl,
+                PanelKind::Search
+            ]
+        );
+        assert_eq!(
+            migrated[&PanelPosition::BottomLeft],
+            im::vector![PanelKind::Problem]
+        );
+        assert!(
+            default_panel_order()
+                .values()
+                .all(|panels| !panels.contains(&PanelKind::Debug))
+        );
+    }
 }

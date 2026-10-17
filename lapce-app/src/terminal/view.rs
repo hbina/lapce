@@ -16,8 +16,7 @@ use floem::{
         kurbo::{Point, Rect, Size},
     },
     pointer::PointerInputEvent,
-    prelude::SignalTrack,
-    reactive::{ReadSignal, RwSignal, SignalGet, SignalWith, create_effect},
+    reactive::{ReadSignal, SignalGet, SignalWith, create_effect},
     text::{Attrs, AttrsList, FamilyOwned, TextLayout, Weight},
     views::editor::{core::register::Clipboard, text::SystemClipboard},
 };
@@ -32,7 +31,6 @@ use super::{panel::TerminalPanelData, raw::RawTerminal};
 use crate::{
     command::InternalCommand,
     config::{LapceConfig, color::LapceColor},
-    debug::RunDebugProcess,
     editor::location::{EditorLocation, EditorPosition},
     listener::Listener,
     panel::kind::PanelKind,
@@ -65,9 +63,11 @@ pub struct TerminalView {
     size: Size,
     is_focused: bool,
     config: ReadSignal<Arc<LapceConfig>>,
-    run_config: ReadSignal<Option<RunDebugProcess>>,
     proxy: ProxyRpcHandler,
-    launch_error: RwSignal<Option<String>>,
+    launch_error: crate::reactive_model::ModelField<
+        lapce_engine::terminal::TerminalState,
+        Option<String>,
+    >,
     internal_command: Listener<InternalCommand>,
     workspace: Arc<LapceWorkspace>,
     hyper_regs: Vec<Regex>,
@@ -80,9 +80,11 @@ pub fn terminal_view(
     term_id: TermId,
     raw: ReadSignal<Arc<RwLock<RawTerminal>>>,
     mode: ReadSignal<Mode>,
-    run_config: ReadSignal<Option<RunDebugProcess>>,
     terminal_panel_data: TerminalPanelData,
-    launch_error: RwSignal<Option<String>>,
+    launch_error: crate::reactive_model::ModelField<
+        lapce_engine::terminal::TerminalState,
+        Option<String>,
+    >,
     internal_command: Listener<InternalCommand>,
     workspace: Arc<LapceWorkspace>,
 ) -> TerminalView {
@@ -135,7 +137,6 @@ pub fn terminal_view(
         mode,
         config,
         proxy,
-        run_config,
         size: Size::ZERO,
         is_focused: false,
         launch_error,
@@ -167,7 +168,8 @@ impl TerminalView {
         let char_width = self.char_size().width;
         let width = (self.size.width / char_width).floor() as usize;
         let height = (self.size.height / line_height).floor() as usize;
-        (width.max(1), height.max(1))
+        let size = lapce_rpc::terminal::TerminalSize::clamp(width, height);
+        (size.columns as usize, size.rows as usize)
     }
 
     fn click(&self, pos: Point) -> Option<()> {
@@ -456,13 +458,7 @@ impl TerminalView {
                     .with_origin(Point::new(x, line_content.y));
             let mode = self.mode.get_untracked();
             let cursor_color = if mode == Mode::Terminal {
-                if self.run_config.with_untracked(|run_config| {
-                    run_config.as_ref().map(|r| r.stopped).unwrap_or(false)
-                }) {
-                    config.color(LapceColor::LAPCE_ERROR)
-                } else {
-                    config.color(LapceColor::TERMINAL_CURSOR)
-                }
+                config.color(LapceColor::TERMINAL_CURSOR)
             } else {
                 config.color(LapceColor::EDITOR_CARET)
             };

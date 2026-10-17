@@ -1,4 +1,4 @@
-use std::{path::PathBuf, rc::Rc};
+use std::path::PathBuf;
 
 pub use floem::views::editor::command::CommandExecuted;
 use floem::{
@@ -11,20 +11,16 @@ use lapce_core::command::{
     MultiSelectionCommand, ScrollCommand,
 };
 use lapce_rpc::{
-    dap_types::{DapId, RunDebugConfig},
-    plugin::{PluginId, VoltID},
+    plugin::VoltID,
     proxy::ProxyStatus,
     terminal::{TermId, TerminalProfile},
 };
-use lsp_types::{CodeActionOrCommand, Position, WorkspaceEdit};
 use serde_json::Value;
 use strum::{EnumMessage, IntoEnumIterator};
 use strum_macros::{Display, EnumIter, EnumString, IntoStaticStr};
 
 use crate::{
     alert::AlertButton,
-    debug::RunDebugMode,
-    doc::Doc,
     editor::location::EditorLocation,
     editor_tab::EditorTabChild,
     id::EditorTabId,
@@ -50,6 +46,24 @@ pub enum CommandKind {
 }
 
 impl CommandKind {
+    pub fn available_in_code_browser(&self) -> bool {
+        match self {
+            Self::Workbench(command) => command.available_in_code_browser(),
+            Self::Edit(command) => command.not_changing_buffer(),
+            Self::Focus(command) => !matches!(
+                command,
+                FocusCommand::Save
+                    | FocusCommand::SaveWithoutFormatting
+                    | FocusCommand::ShowCodeActions
+                    | FocusCommand::FocusReplaceEditor
+                    | FocusCommand::FormatDocument
+                    | FocusCommand::Rename
+            ),
+            Self::MotionMode(_) => false,
+            _ => true,
+        }
+    }
+
     pub fn desc(&self) -> Option<&'static str> {
         match &self {
             CommandKind::Workbench(cmd) => cmd.get_message(),
@@ -89,10 +103,31 @@ impl From<Command> for CommandKind {
     }
 }
 
+impl LapceWorkbenchCommand {
+    pub fn available_in_code_browser(&self) -> bool {
+        !matches!(
+            self,
+            Self::FileExplorerRename
+                | Self::FileExplorerTrash
+                | Self::NewFile
+                | Self::ToggleDebugVisual
+                | Self::SourceControlCommit
+                | Self::SourceControlDiscardActiveFileChanges
+                | Self::SourceControlDiscardTargetFileChanges
+                | Self::SourceControlDiscardWorkspaceChanges
+                | Self::SaveAll
+                | Self::SourceControlInit
+                | Self::PaletteSCMReferences
+                | Self::CheckoutReference
+        )
+    }
+}
+
 pub fn lapce_internal_commands() -> IndexMap<String, LapceCommand> {
     let mut commands = IndexMap::new();
 
-    for c in LapceWorkbenchCommand::iter() {
+    for c in LapceWorkbenchCommand::iter().filter(|c| c.available_in_code_browser())
+    {
         let command = LapceCommand {
             kind: CommandKind::Workbench(c.clone()),
             data: None,
@@ -206,10 +241,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(serialize = "reveal_in_file_explorer")]
     #[strum(message = "Reveal in System File Explorer")]
     RevealInFileExplorer,
-
-    #[strum(serialize = "run_in_terminal")]
-    #[strum(message = "Run in Terminal")]
-    RunInTerminal,
 
     #[strum(serialize = "reveal_active_file_in_file_explorer")]
     #[strum(message = "Reveal Active File in File Explorer")]
@@ -339,6 +370,10 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Reload Window")]
     ReloadWindow,
 
+    #[strum(serialize = "restart_backend")]
+    #[strum(message = "Restart Workspace Backend")]
+    RestartBackend,
+
     #[strum(message = "New Window")]
     #[strum(serialize = "new_window")]
     NewWindow,
@@ -383,10 +418,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(serialize = "palette.workspace")]
     PaletteWorkspace,
 
-    #[strum(message = "Run and Debug")]
-    #[strum(serialize = "palette.run_and_debug")]
-    PaletteRunAndDebug,
-
     #[strum(message = "Source Control: Checkout")]
     #[strum(serialize = "palette.scm_references")]
     PaletteSCMReferences,
@@ -398,14 +429,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "List Palette Types and Files")]
     #[strum(serialize = "palette.palette_help_and_file")]
     PaletteHelpAndFile,
-
-    #[strum(message = "Run and Debug Restart Current Running")]
-    #[strum(serialize = "palette.run_and_debug_restart")]
-    RunAndDebugRestart,
-
-    #[strum(message = "Run and Debug Stop Current Running")]
-    #[strum(serialize = "palette.run_and_debug_stop")]
-    RunAndDebugStop,
 
     #[strum(serialize = "source_control.checkout_reference")]
     CheckoutReference,
@@ -584,10 +607,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Go to Location")]
     GoToLocation,
 
-    #[strum(serialize = "add_run_debug_config")]
-    #[strum(message = "Add Run Debug Config")]
-    AddRunDebugConfig,
-
     #[strum(serialize = "jump_highlight_next")]
     #[strum(message = "Jump to next document highlight")]
     JumpHighlightNext,
@@ -615,21 +634,6 @@ pub enum InternalCommand {
     },
     ReloadFileExplorer,
     /// Test whether a file/directory can be created at that path
-    TestPathCreation {
-        new_path: PathBuf,
-    },
-    FinishRenamePath {
-        current_path: PathBuf,
-        new_path: PathBuf,
-    },
-    FinishNewNode {
-        is_dir: bool,
-        path: PathBuf,
-    },
-    FinishDuplicate {
-        source: PathBuf,
-        path: PathBuf,
-    },
     GoToLocation {
         location: EditorLocation,
     },
@@ -682,44 +686,14 @@ pub enum InternalCommand {
         child: EditorTabChild,
         kind: TabCloseKind,
     },
-    ShowCodeActions {
-        offset: usize,
-        mouse_click: bool,
-        plugin_id: PluginId,
-        code_actions: im::Vector<CodeActionOrCommand>,
-    },
-    RunCodeAction {
-        plugin_id: PluginId,
-        action: CodeActionOrCommand,
-    },
-    ApplyWorkspaceEdit {
-        edit: WorkspaceEdit,
-    },
-    RunAndDebug {
-        mode: RunDebugMode,
-        config: RunDebugConfig,
-    },
-    StartRename {
-        path: PathBuf,
-        placeholder: String,
-        start: usize,
-        position: Position,
-    },
+
     Search {
         pattern: Option<String>,
     },
     FindEditorReceiveChar {
         s: String,
     },
-    ReplaceEditorReceiveChar {
-        s: String,
-    },
     FindEditorCommand {
-        command: LapceCommand,
-        count: Option<usize>,
-        mods: Modifiers,
-    },
-    ReplaceEditorCommand {
         command: LapceCommand,
         count: Option<usize>,
         mods: Modifiers,
@@ -753,19 +727,10 @@ pub enum InternalCommand {
         buttons: Vec<AlertButton>,
     },
     HideAlert,
-    SaveScratchDoc {
-        doc: Rc<Doc>,
-    },
-    SaveScratchDoc2 {
-        doc: Rc<Doc>,
-    },
     UpdateProxyStatus {
         status: ProxyStatus,
     },
-    DapFrameScopes {
-        dap_id: DapId,
-        frame_id: usize,
-    },
+
     OpenVoltView {
         volt_id: VoltID,
     },
@@ -786,12 +751,6 @@ pub enum InternalCommand {
     CallHierarchyIncoming {
         item_id: ViewId,
     },
-    StopTerminal {
-        term_id: TermId,
-    },
-    RestartTerminal {
-        term_id: TermId,
-    },
 }
 
 #[derive(Clone)]
@@ -810,4 +769,58 @@ pub enum WindowCommand {
     PreviousWorkspaceTab,
     NewWindow,
     CloseWindow,
+}
+
+#[cfg(test)]
+mod code_browser_tests {
+    use super::*;
+
+    #[test]
+    fn browsing_commands_remain_available_and_write_actions_are_hidden() {
+        assert!(
+            CommandKind::Focus(FocusCommand::GotoDefinition)
+                .available_in_code_browser()
+        );
+        assert!(
+            CommandKind::Workbench(LapceWorkbenchCommand::FindReferences)
+                .available_in_code_browser()
+        );
+        assert!(
+            CommandKind::Edit(EditCommand::ClipboardCopy)
+                .available_in_code_browser()
+        );
+        for command in [
+            FocusCommand::Save,
+            FocusCommand::SaveWithoutFormatting,
+            FocusCommand::FormatDocument,
+            FocusCommand::Rename,
+        ] {
+            assert!(!CommandKind::Focus(command).available_in_code_browser());
+        }
+        assert!(
+            !CommandKind::Edit(EditCommand::ClipboardPaste)
+                .available_in_code_browser()
+        );
+        for removed in [
+            "palette.run_and_debug",
+            "palette.run_and_debug_restart",
+            "palette.run_and_debug_stop",
+            "add_run_debug_config",
+            "run_in_terminal",
+        ] {
+            assert!(
+                removed.parse::<LapceWorkbenchCommand>().is_err(),
+                "{removed}"
+            );
+        }
+        assert!(
+            !CommandKind::Workbench(LapceWorkbenchCommand::SourceControlInit)
+                .available_in_code_browser()
+        );
+        // Local search inputs still need editing commands in the keypress registry.
+        let commands = lapce_internal_commands();
+        assert!(commands.contains_key("clipboard_paste"));
+        assert!(commands.contains_key("delete_backward"));
+        assert!(!commands.contains_key("save_all"));
+    }
 }

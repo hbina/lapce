@@ -1,6 +1,8 @@
 #:schema ../extra/schemas/settings.json
 
 [core]
+backend-executable = ""
+backend-socket = ""
 modal = false
 color-theme = "Lapce Dark"
 icon-theme = "Lapce Codicons"
@@ -32,13 +34,9 @@ auto-closing-matching-pairs = true
 auto-surround = true
 hover-delay = 300                                            # ms
 modal-mode-relative-line-numbers = true
-format-on-save = false
 highlight-matching-brackets = true
 highlight-selection-occurrences = true
 highlight-scope-lines = false
-autosave-interval = 0
-format-on-autosave = true
-normalize-line-endings = true
 enable-inlay-hints = true
 inlay-hint-font-family = ""
 inlay-hint-font-size = 0

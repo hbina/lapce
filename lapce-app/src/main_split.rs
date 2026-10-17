@@ -1,41 +1,29 @@
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     rc::Rc,
 };
 
 use floem::{
-    action::save_as,
     ext_event::create_ext_action,
-    file::{FileDialogOptions, FileInfo},
-    keyboard::Modifiers,
     peniko::kurbo::{Point, Rect, Vec2},
     reactive::{Memo, RwSignal, Scope, SignalGet, SignalUpdate, SignalWith},
     views::editor::id::EditorId,
 };
 use itertools::Itertools;
 use lapce_core::{
-    buffer::rope_text::RopeText, command::FocusCommand, cursor::Cursor,
-    rope_text_pos::RopeTextPosition, selection::Selection, syntax::Syntax,
+    buffer::rope_text::RopeText, cursor::Cursor, rope_text_pos::RopeTextPosition,
+    selection::Selection,
 };
 use lapce_rpc::{
-    buffer::BufferId,
-    core::FileChanged,
-    plugin::{PluginId, VoltID},
-    proxy::ProxyResponse,
+    buffer::BufferId, core::FileChanged, plugin::VoltID, proxy::ProxyResponse,
 };
-use lapce_xi_rope::{Rope, spans::SpansBuilder};
-use lsp_types::{
-    CodeAction, CodeActionOrCommand, DiagnosticSeverity, DocumentChangeOperation,
-    DocumentChanges, OneOf, Position, TextEdit, Url, WorkspaceEdit,
-};
+use lapce_xi_rope::Rope;
+use lsp_types::{DiagnosticSeverity, Position, TextEdit};
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
 use tracing::{Level, event};
 
 use crate::{
     alert::AlertButton,
-    code_lens::CodeLensData,
     command::InternalCommand,
     doc::{DiagnosticData, Doc, DocContent, DocHistory, EditorDiagnostic},
     editor::{
@@ -396,18 +384,23 @@ pub struct MainSplitData {
     pub editor_tabs: RwSignal<im::HashMap<EditorTabId, RwSignal<EditorTabData>>>,
     pub editors: Editors,
     pub diff_editors: RwSignal<im::HashMap<DiffEditorId, DiffEditorData>>,
-    pub docs: RwSignal<im::HashMap<PathBuf, Rc<Doc>>>,
-    pub scratch_docs: RwSignal<im::HashMap<String, Rc<Doc>>>,
+    documents: RwSignal<lapce_engine::session::WorkspaceDocuments<Rc<Doc>>>,
+    pub docs: crate::reactive_model::ModelField<
+        lapce_engine::session::WorkspaceDocuments<Rc<Doc>>,
+        im::HashMap<PathBuf, Rc<Doc>>,
+    >,
+    pub scratch_docs: crate::reactive_model::ModelField<
+        lapce_engine::session::WorkspaceDocuments<Rc<Doc>>,
+        im::HashMap<String, Rc<Doc>>,
+    >,
     pub diagnostics: RwSignal<im::HashMap<PathBuf, DiagnosticData>>,
     pub references: RwSignal<ReferencesRoot>,
     pub implementations: RwSignal<crate::panel::implementation_view::ReferencesRoot>,
     pub active_editor: Memo<Option<EditorData>>,
     pub find_editor: EditorData,
-    pub replace_editor: EditorData,
     pub locations: RwSignal<im::Vector<EditorLocation>>,
     pub current_location: RwSignal<usize>,
     pub width: RwSignal<f64>,
-    pub code_lens: RwSignal<CodeLensData>,
     pub common: Rc<CommonData>,
 }
 
@@ -429,9 +422,23 @@ impl MainSplitData {
         let editors = Editors::new(cx);
         let diff_editors: RwSignal<im::HashMap<DiffEditorId, DiffEditorData>> =
             cx.create_rw_signal(im::HashMap::new());
-        let docs: RwSignal<im::HashMap<PathBuf, Rc<Doc>>> =
-            cx.create_rw_signal(im::HashMap::new());
-        let scratch_docs = cx.create_rw_signal(im::HashMap::new());
+        let documents = cx.create_rw_signal(
+            lapce_engine::session::WorkspaceDocuments::<Rc<Doc>>::default(),
+        );
+        let docs = crate::reactive_model::ModelField::new(
+            documents,
+            cx.create_rw_signal(()),
+            |state| &state.files,
+            |state| &mut state.files,
+            None,
+        );
+        let scratch_docs = crate::reactive_model::ModelField::new(
+            documents,
+            cx.create_rw_signal(()),
+            |state| &state.scratch,
+            |state| &mut state.scratch,
+            None,
+        );
         let locations = cx.create_rw_signal(im::Vector::new());
         let references = cx.create_rw_signal(ReferencesRoot::default());
         let implementations = cx.create_rw_signal(
@@ -440,7 +447,6 @@ impl MainSplitData {
         let current_location = cx.create_rw_signal(0);
         let diagnostics = cx.create_rw_signal(im::HashMap::new());
         let find_editor = editors.make_local(cx, common.clone());
-        let replace_editor = editors.make_local(cx, common.clone());
 
         let active_editor = cx.create_memo(move |_| -> Option<EditorData> {
             let active_editor_tab = active_editor_tab.get()?;
@@ -485,16 +491,15 @@ impl MainSplitData {
             editor_tabs,
             editors,
             diff_editors,
+            documents,
             docs,
             scratch_docs,
             active_editor,
             find_editor,
-            replace_editor,
             diagnostics,
             locations,
             current_location,
             width: cx.create_rw_signal(0.0),
-            code_lens: cx.create_rw_signal(CodeLensData::new(common.clone())),
             common,
             references,
             implementations,
@@ -517,7 +522,6 @@ impl MainSplitData {
             EditorTabChild::Editor(editor_id) => {
                 let editor = self.editors.editor_untracked(editor_id)?;
                 let handle = keypress.key_down(event, &editor);
-                editor.get_code_actions();
                 Some(handle)
             }
             EditorTabChild::DiffEditor(diff_editor_id) => {
@@ -531,7 +535,6 @@ impl MainSplitData {
                     &diff_editor.left
                 };
                 let handle = keypress.key_down(event, editor);
-                editor.get_code_actions();
                 Some(handle)
             }
             EditorTabChild::Settings(_) => None,
@@ -613,59 +616,45 @@ impl MainSplitData {
         self.go_to_location(location, edits);
     }
 
-    pub fn get_doc(
-        &self,
-        path: PathBuf,
-        unsaved: Option<String>,
-    ) -> (Rc<Doc>, bool) {
+    pub fn get_doc(&self, path: PathBuf) -> (Rc<Doc>, bool) {
         let cx = self.scope;
-        let doc = self.docs.with_untracked(|docs| docs.get(&path).cloned());
-        if let Some(doc) = doc {
+        let (doc, created) = self
+            .documents
+            .try_update(|documents| {
+                documents.file(path.clone(), || {
+                    Rc::new(Doc::new(
+                        cx,
+                        path.clone(),
+                        self.get_diagnostic_data(&path),
+                        self.editors,
+                        self.common.clone(),
+                    ))
+                })
+            })
+            .expect("workspace is active");
+        if !created {
             (doc, false)
         } else {
-            let diagnostic_data = self.get_diagnostic_data(&path);
-
-            let doc = Doc::new(
-                cx,
-                path.clone(),
-                diagnostic_data,
-                self.editors,
-                self.common.clone(),
-            );
-            let doc = Rc::new(doc);
-            self.docs.update(|docs| {
-                docs.insert(path.clone(), doc.clone());
-            });
+            self.docs.update(|_| {});
 
             {
                 let doc = doc.clone();
                 let local_doc = doc.clone();
-                let send = create_ext_action(cx, move |result| {
-                    if let Ok(ProxyResponse::NewBufferResponse {
-                        content,
-                        read_only,
-                    }) = result
-                    {
-                        local_doc.init_content(Rope::from(content));
-                        if read_only {
-                            local_doc.content.update(|content| {
-                                if let DocContent::File { read_only, .. } = content {
-                                    *read_only = true;
-                                }
-                            });
-                        } else if let Some(unsaved) = unsaved {
-                            local_doc.reload(Rope::from(unsaved), false);
-                        }
-                    }
-                });
+                let opening = doc.opening().expect("file document can be opened");
+                let request = opening.request();
+                let send = create_ext_action(
+                    cx,
+                    move |result: Result<ProxyResponse, lapce_rpc::RpcError>| {
+                        // Loading, read-only policy and backend ownership have
+                        // one shared session transition; Doc updates its views.
+                        let _ = local_doc.finish_opening(opening, result);
+                    },
+                );
 
-                self.common
-                    .proxy
-                    .new_buffer(doc.buffer_id, path, move |result| {
-                        send(result);
-                    });
+                self.common.proxy.request_async(request, move |result| {
+                    send(result);
+                });
             }
-            doc.get_code_lens();
             doc.get_folding_range();
             doc.get_document_symbol();
             (doc, true)
@@ -681,7 +670,7 @@ impl MainSplitData {
             self.common.focus.set(Focus::Workbench);
         }
         let path = location.path.clone();
-        let (doc, new_doc) = self.get_doc(path.clone(), None);
+        let (doc, new_doc) = self.get_doc(path.clone());
 
         let child = self.get_editor_tab_child(
             EditorTabChildSource::Editor { path, doc },
@@ -696,7 +685,7 @@ impl MainSplitData {
     }
 
     pub fn open_file_changes(&self, path: PathBuf) {
-        let (right, _) = self.get_doc(path.clone(), None);
+        let (right, _) = self.get_doc(path.clone());
         let left = Doc::new_history(
             self.scope,
             DocContent::History(DocHistory {
@@ -729,8 +718,7 @@ impl MainSplitData {
     }
 
     pub fn open_diff_files(&self, left_path: PathBuf, right_path: PathBuf) {
-        let [left, right] =
-            [left_path, right_path].map(|path| self.get_doc(path, None).0);
+        let [left, right] = [left_path, right_path].map(|path| self.get_doc(path).0);
 
         self.get_editor_tab_child(
             EditorTabChildSource::DiffEditor { left, right },
@@ -842,8 +830,7 @@ impl MainSplitData {
                                         false
                                     };
 
-                                same_path
-                                    || doc.buffer.with_untracked(|b| b.is_pristine())
+                                same_path || doc.is_pristine()
                             } else {
                                 false
                             }
@@ -1883,7 +1870,9 @@ impl MainSplitData {
                 let editor = self.editors.editor_untracked(*editor_id)?;
                 let doc = editor.doc();
                 let doc_content = doc.content.get_untracked();
-                let is_dirty = !doc.is_pristine();
+                let is_dirty = lapce_engine::view_state::DocumentViewState::requires_close_confirmation(
+                    &doc_content, doc.is_pristine(),
+                );
                 if is_dirty {
                     let exists = self.editors.with_editors_untracked(|editors| {
                         editors.iter().any(|(id, editor)| {
@@ -2010,110 +1999,31 @@ impl MainSplitData {
         force: bool,
     ) -> Option<()> {
         if !force {
-            if let Some((name, doc, editor)) =
+            if let Some((name, _doc, _editor)) =
                 self.editor_tab_child_close_warning(&child)
             {
                 let internal_command = self.common.internal_command;
                 let main_split = self.clone();
 
-                let doc_content = doc.content.get_untracked();
-                let save_button = match doc_content {
-                    DocContent::Scratch { .. } => {
-                        let child = child.clone();
-                        let doc = doc.clone();
-                        let save_action = Rc::new(move || {
-                            let child = child.clone();
-                            let main_split = main_split.clone();
-                            let doc = doc.clone();
-                            internal_command.send(InternalCommand::HideAlert);
-                            save_as(
-                                FileDialogOptions::new().title("Save File"),
-                                move |file: Option<FileInfo>| {
-                                    let main_split = main_split.clone();
-                                    let child = child.clone();
-                                    let local_main_split = main_split.clone();
-                                    if let Some(mut file) = file {
-                                        main_split.save_as(
-                                            doc.clone(),
-                                            if let Some(path) = file.path.pop() {
-                                                path
-                                            } else {
-                                                tracing::error!("No path");
-                                                return;
-                                            },
-                                            move || {
-                                                local_main_split
-                                                    .clone()
-                                                    .editor_tab_child_close(
-                                                        editor_tab_id,
-                                                        child.clone(),
-                                                        false,
-                                                    );
-                                            },
-                                        );
-                                    }
-                                },
-                            );
-                        });
-                        Some(AlertButton {
-                            text: "Save".to_string(),
-                            action: save_action,
-                        })
-                    }
-                    DocContent::File { .. } => {
-                        let editor = editor.clone();
-                        let editors = self.editors;
-                        let editor_id = editor.id();
-                        let save_action = Rc::new(move || {
-                            internal_command.send(InternalCommand::HideAlert);
-                            editor.save(false, move || {
-                                if let Some(editor) =
-                                    editors.editor_untracked(editor_id)
-                                {
-                                    editor.clone().run_focus_command(
-                                        &FocusCommand::SplitClose,
-                                        None,
-                                        Modifiers::empty(),
-                                    );
-                                }
-                            });
-                        });
-                        Some(AlertButton {
-                            text: "Save".to_string(),
-                            action: save_action,
-                        })
-                    }
-                    DocContent::Local => None,
-                    DocContent::History(_) => None,
-                };
-                if let Some(save_button) = save_button {
-                    let main_split = self.clone();
-                    let child = child.clone();
-                    self.common
-                        .internal_command
-                        .send(InternalCommand::ShowAlert {
-                            title: format!(
-                                "Do you want to save the changes you made to {name}?"
-                            ),
-                            msg: "Your changes will be lost if you don't save them."
-                                .to_string(),
-                            buttons: vec![
-                                save_button,
-                                AlertButton {
-                                    text: "Don't Save".to_string(),
-                                    action: Rc::new(move || {
-                                        internal_command
-                                            .send(InternalCommand::HideAlert);
-                                        main_split.editor_tab_child_close(
-                                            editor_tab_id,
-                                            child.clone(),
-                                            true,
-                                        );
-                                    }),
-                                },
-                            ],
-                        });
-                }
+                let child = child.clone();
+                self.common
+                    .internal_command
+                    .send(InternalCommand::ShowAlert {
+                        title: format!("Close legacy scratch tab {name}?"),
+                        msg: "Its stored content will be removed from this session."
+                            .into(),
+                        buttons: vec![AlertButton {
+                            text: "Close".into(),
+                            action: Rc::new(move || {
+                                internal_command.send(InternalCommand::HideAlert);
+                                main_split.editor_tab_child_close(
+                                    editor_tab_id,
+                                    child.clone(),
+                                    true,
+                                );
+                            }),
+                        }],
+                    });
 
                 return Some(());
             }
@@ -2182,83 +2092,6 @@ impl MainSplitData {
         Some(())
     }
 
-    pub fn run_code_action(&self, plugin_id: PluginId, action: CodeActionOrCommand) {
-        match action {
-            CodeActionOrCommand::Command(command) => {
-                self.run_code_lens(
-                    &command.command,
-                    command.arguments.unwrap_or_default(),
-                );
-            }
-            CodeActionOrCommand::CodeAction(action) => {
-                if let Some(edit) = action.edit.as_ref() {
-                    self.apply_workspace_edit(edit);
-                } else {
-                    self.resolve_code_action(plugin_id, action);
-                }
-            }
-        }
-    }
-
-    pub fn run_code_lens(&self, command: &str, args: Vec<Value>) {
-        self.code_lens.get_untracked().run(command, args);
-    }
-
-    /// Resolve a code action and apply its held workspace edit
-    fn resolve_code_action(&self, plugin_id: PluginId, action: CodeAction) {
-        let main_split = self.clone();
-        let send = create_ext_action(self.scope, move |edit| {
-            main_split.apply_workspace_edit(&edit);
-        });
-        self.common
-            .proxy
-            .code_action_resolve(action, plugin_id, move |result| {
-                if let Ok(ProxyResponse::CodeActionResolveResponse { item }) = result
-                {
-                    if let Some(edit) = item.edit {
-                        send(edit);
-                    }
-                }
-            });
-    }
-
-    /// Perform a workspace edit, which are from the LSP (such as code actions, or symbol renaming)
-    pub fn apply_workspace_edit(&self, edit: &WorkspaceEdit) {
-        if let Some(DocumentChanges::Operations(_op)) =
-            edit.document_changes.as_ref()
-        {
-            // TODO
-        }
-
-        if let Some(edits) = workspace_edits(edit) {
-            for (url, edits) in edits {
-                if let Ok(path) = url.to_file_path() {
-                    let active_path = self
-                        .active_editor
-                        .get_untracked()
-                        .map(|editor| editor.doc())
-                        .map(|doc| doc.content.get_untracked())
-                        .and_then(|content| content.path().cloned());
-                    let position = if active_path.as_ref() == Some(&path) {
-                        None
-                    } else {
-                        edits
-                            .first()
-                            .map(|edit| EditorPosition::Position(edit.range.start))
-                    };
-                    let location = EditorLocation {
-                        path,
-                        position,
-                        scroll_offset: None,
-                        ignore_unconfirmed: true,
-                        same_editor_tab: false,
-                    };
-                    self.jump_to_location(location, Some(edits));
-                }
-            }
-        }
-    }
-
     pub fn next_error(&self) {
         let file_diagnostics =
             self.file_diagnostics_items(DiagnosticSeverity::ERROR);
@@ -2296,41 +2129,11 @@ impl MainSplitData {
         diagnostics
             .into_iter()
             .filter_map(|(path, diagnostic)| {
-                let span = diagnostic.diagnostics_span.get_untracked();
-                if !span.is_empty() {
-                    let diags = span
-                        .iter()
-                        .filter_map(|(iv, diag)| {
-                            if diag.severity == Some(severity) {
-                                Some(EditorDiagnostic {
-                                    range: Some((iv.start, iv.end)),
-                                    diagnostic: diag.to_owned(),
-                                })
-                            } else {
-                                None
-                            }
-                        })
-                        .collect::<Vec<EditorDiagnostic>>();
-                    if !diags.is_empty() {
-                        Some((path, diags))
-                    } else {
-                        None
-                    }
+                let entries = diagnostic.entries(severity, false);
+                if entries.is_empty() {
+                    None
                 } else {
-                    let diagnostics = diagnostic.diagnostics.get_untracked();
-                    let diagnostics: Vec<EditorDiagnostic> = diagnostics
-                        .into_iter()
-                        .filter(|d| d.severity == Some(severity))
-                        .map(|d| EditorDiagnostic {
-                            range: None,
-                            diagnostic: d,
-                        })
-                        .collect();
-                    if !diagnostics.is_empty() {
-                        Some((path, diagnostics))
-                    } else {
-                        None
-                    }
+                    Some((path, entries.into_iter().collect()))
                 }
             })
             .sorted_by_key(|(path, _)| path.clone())
@@ -2341,13 +2144,7 @@ impl MainSplitData {
         if let Some(d) = self.diagnostics.with_untracked(|d| d.get(path).cloned()) {
             d
         } else {
-            let diagnostic_data = DiagnosticData {
-                expanded: self.scope.create_rw_signal(true),
-                diagnostics: self.scope.create_rw_signal(im::Vector::new()),
-                diagnostics_span: self
-                    .scope
-                    .create_rw_signal(SpansBuilder::new(0).build()),
-            };
+            let diagnostic_data = DiagnosticData::new(self.scope);
             self.diagnostics.update(|d| {
                 d.insert(path.to_path_buf(), diagnostic_data.clone());
             });
@@ -2367,29 +2164,87 @@ impl MainSplitData {
                 doc.handle_file_changed(Rope::from(content));
             }
             FileChanged::Delete => {
-                if self.docs.with_untracked(|x| x.get(path).is_none()) {
-                    return;
-                }
-                let Some(editor_id) = self.editors.get_editor_id_by_path(path)
+                let Some(doc) =
+                    self.docs.with_untracked(|docs| docs.get(path).cloned())
                 else {
                     return;
                 };
-                let id = editor_id.to_raw();
-                if let Some(tab_id) = self.editor_tabs.with_untracked(|x| {
-                    for (tab_id, tab_data) in x {
-                        if tab_data.with_untracked(|x| {
-                            x.children.iter().any(|(_, _, child)| child.id() == id)
-                        }) {
-                            return Some(*tab_id);
-                        }
-                    }
-                    None
-                }) {
-                    self.editor_tab_close(tab_id);
+                // A filesystem event must not discard a user's open or dirty
+                // document. Only an unused, pristine cached document may close.
+                if !doc.is_pristine()
+                    || self.editors.get_editor_id_by_path(path).is_some()
+                    || self.diff_editors.with_untracked(|editors| {
+                        editors.values().any(|editor| {
+                            editor.left.doc().content.with_untracked(|content| {
+                                content.path().is_some_and(|p| p == path)
+                            }) || editor.right.doc().content.with_untracked(
+                                |content| content.path().is_some_and(|p| p == path),
+                            )
+                        })
+                    })
+                {
+                    doc.mark_deleted();
+                    return;
                 }
-                self.editors.remove(editor_id);
-                self.docs.update(|x| {
-                    x.remove(path);
+                let main_split = self.clone();
+                let path = path.to_owned();
+                let owner = doc.buffer_id;
+                let closing_doc = doc.clone();
+                doc.close_backend(move |result| {
+                    if result.is_err() {
+                        return;
+                    }
+                    let removed = main_split
+                        .docs
+                        .try_update(|documents| {
+                            if documents
+                                .get(&path)
+                                .is_some_and(|document| document.buffer_id == owner)
+                            {
+                                documents.remove(&path);
+                                true
+                            } else {
+                                false
+                            }
+                        })
+                        .unwrap_or(false);
+                    if !removed {
+                        return;
+                    }
+                    // A view may have opened this cached document while close
+                    // was in flight. Reopen the same session document after the
+                    // acknowledgement, preserving text and undo history.
+                    let mut editors =
+                        main_split.editors.with_editors_untracked(|editors| {
+                            editors
+                                .values()
+                                .filter(|editor| editor.doc().buffer_id == owner)
+                                .cloned()
+                                .collect::<Vec<_>>()
+                        });
+                    main_split.diff_editors.with_untracked(|diffs| {
+                        for diff in diffs.values() {
+                            for editor in [&diff.left, &diff.right] {
+                                if editor.doc().buffer_id == owner {
+                                    editors.push(editor.clone());
+                                }
+                            }
+                        }
+                    });
+                    if !editors.is_empty() {
+                        closing_doc.mark_deleted();
+                        main_split.docs.update(|documents| { documents.insert(path, closing_doc.clone()); });
+                        let common = main_split.common.clone();
+                        closing_doc.reopen_backend(move |result| {
+                            if let Err(message) = result {
+                                common.internal_command.send(InternalCommand::ShowAlert {
+                                    title: "Document could not reopen".into(),
+                                    msg: format!("{message}\nYour local text and undo history are preserved."),
+                                    buttons: Vec::new(),
+                                });
+                            }
+                        });
+                    }
                 });
             }
         }
@@ -2433,138 +2288,9 @@ impl MainSplitData {
         self.get_editor_tab_child(EditorTabChildSource::NewFileEditor, false, false)
     }
 
-    pub fn save_as(&self, doc: Rc<Doc>, path: PathBuf, action: impl Fn() + 'static) {
-        let (buffer_id, doc_content, rev, content) = (
-            doc.buffer_id,
-            doc.content.get_untracked(),
-            doc.rev(),
-            doc.buffer.with_untracked(|b| b.to_string()),
-        );
-        match doc_content {
-            DocContent::Scratch { .. } => {
-                let send = {
-                    let path = path.clone();
-                    create_ext_action(self.scope, move |result| {
-                        if let Err(err) = result {
-                            event!(
-                                Level::WARN,
-                                "Failed to save as a file: {:?}",
-                                err
-                            );
-                        } else {
-                            let syntax = Syntax::init(&path);
-                            doc.content.set(DocContent::File {
-                                path: path.clone(),
-                                read_only: false,
-                            });
-                            doc.buffer.update(|buffer| {
-                                buffer.set_pristine();
-                            });
-                            doc.set_syntax(syntax);
-                            doc.trigger_syntax_change(None);
-                            action();
-                        }
-                    })
-                };
-                self.common.proxy.save_buffer_as(
-                    buffer_id,
-                    path,
-                    rev,
-                    content,
-                    true,
-                    Box::new(move |result| {
-                        send(result);
-                    }),
-                );
-            }
-            DocContent::Local => {}
-            DocContent::File { .. } => {}
-            DocContent::History(_) => {}
-        }
-    }
-
-    pub fn save_as2(
-        &self,
-        doc: Rc<Doc>,
-        path: PathBuf,
-        action: impl Fn() + 'static,
-    ) {
-        let (buffer_id, doc_content, rev, content) = (
-            doc.buffer_id,
-            doc.content.get_untracked(),
-            doc.rev(),
-            doc.buffer.with_untracked(|b| b.to_string()),
-        );
-        match doc_content {
-            DocContent::Scratch { .. } => {
-                let send = {
-                    let path = path.clone();
-                    create_ext_action(self.scope, move |result| {
-                        if let Err(err) = result {
-                            event!(
-                                Level::WARN,
-                                "Failed to save as a file: {:?}",
-                                err
-                            );
-                        } else {
-                            let syntax = Syntax::init(&path);
-                            doc.content.set(DocContent::File {
-                                path: path.clone(),
-                                read_only: false,
-                            });
-                            doc.buffer.update(|buffer| {
-                                buffer.set_pristine();
-                            });
-                            doc.set_syntax(syntax);
-                            doc.trigger_syntax_change(None);
-                            action();
-                        }
-                    })
-                };
-                self.common.proxy.save_buffer_as(
-                    buffer_id,
-                    path,
-                    rev,
-                    content,
-                    true,
-                    Box::new(move |result| {
-                        send(result);
-                    }),
-                );
-            }
-            DocContent::Local => {}
-            DocContent::File { .. } => {}
-            DocContent::History(_) => {}
-        }
-    }
-
     fn get_name_for_new_file(&self) -> String {
-        const PREFIX: &str = "Untitled-";
-
-        // Checking just the current scratch_docs rather than all the different document
-        // collections seems to be the right thing to do. The user may have genuine 'new N'
-        // files tucked away somewhere in their workspace.
-        let new_num = self.scratch_docs.with_untracked(|scratch_docs| {
-            scratch_docs
-                .values()
-                .filter_map(|doc| {
-                    doc.content.with_untracked(|content| match content {
-                        DocContent::Scratch { name, .. } => {
-                            // The unwraps are safe because scratch docs are always
-                            // titled the same format and the user cannot change the name.
-                            let num_part = name.strip_prefix(PREFIX).unwrap();
-                            let num = num_part.parse::<i32>().unwrap();
-                            Some(num)
-                        }
-                        _ => None,
-                    })
-                })
-                .max()
-                .unwrap_or(0)
-                + 1
-        });
-
-        format!("{PREFIX}{new_num}")
+        self.documents
+            .with_untracked(|documents| documents.next_scratch_name())
     }
 
     pub fn can_jump_location_backward(&self, tracked: bool) -> bool {
@@ -2585,48 +2311,6 @@ impl MainSplitData {
                 || self.current_location.get_untracked()
                     >= self.locations.with_untracked(|l| l.len()) - 1)
         }
-    }
-
-    pub fn save_scratch_doc(&self, doc: Rc<Doc>) {
-        let main_split = self.clone();
-        save_as(
-            FileDialogOptions::new().title("Save File"),
-            move |file: Option<FileInfo>| {
-                if let Some(mut file) = file {
-                    main_split.save_as(
-                        doc.clone(),
-                        if let Some(path) = file.path.pop() {
-                            path
-                        } else {
-                            tracing::error!("No path");
-                            return;
-                        },
-                        move || {},
-                    );
-                }
-            },
-        );
-    }
-
-    pub fn save_scratch_doc2(&self, doc: Rc<Doc>) {
-        let main_split = self.clone();
-        save_as(
-            FileDialogOptions::new().title("Save File"),
-            move |file: Option<FileInfo>| {
-                if let Some(mut file) = file {
-                    main_split.save_as2(
-                        doc.clone(),
-                        if let Some(path) = file.path.pop() {
-                            path
-                        } else {
-                            tracing::error!("No path");
-                            return;
-                        },
-                        move || {},
-                    );
-                }
-            },
-        );
     }
 
     pub fn move_editor_tab_child(
@@ -2994,48 +2678,6 @@ impl MainSplitData {
             _ => None,
         }
     }
-}
-
-fn workspace_edits(edit: &WorkspaceEdit) -> Option<HashMap<Url, Vec<TextEdit>>> {
-    if let Some(changes) = edit.changes.as_ref() {
-        return Some(changes.clone());
-    }
-
-    let changes = edit.document_changes.as_ref()?;
-    let edits = match changes {
-        DocumentChanges::Edits(edits) => edits
-            .iter()
-            .map(|e| {
-                (
-                    e.text_document.uri.clone(),
-                    e.edits
-                        .iter()
-                        .map(|e| match e {
-                            OneOf::Left(e) => e.clone(),
-                            OneOf::Right(e) => e.text_edit.clone(),
-                        })
-                        .collect(),
-                )
-            })
-            .collect::<HashMap<Url, Vec<TextEdit>>>(),
-        DocumentChanges::Operations(ops) => ops
-            .iter()
-            .filter_map(|o| match o {
-                DocumentChangeOperation::Op(_op) => None,
-                DocumentChangeOperation::Edit(e) => Some((
-                    e.text_document.uri.clone(),
-                    e.edits
-                        .iter()
-                        .map(|e| match e {
-                            OneOf::Left(e) => e.clone(),
-                            OneOf::Right(e) => e.text_edit.clone(),
-                        })
-                        .collect(),
-                )),
-            })
-            .collect::<HashMap<Url, Vec<TextEdit>>>(),
-    };
-    Some(edits)
 }
 
 fn next_in_file_errors_offset(

@@ -165,6 +165,14 @@
             "type": "object",
             "additionalProperties": false,
             "properties": {
+                "backend-socket": {
+                    "type": "string",
+                    "description": "Shared backend Unix socket; overrides executable. Reopen workspace after changing."
+                },
+                "backend-executable": {
+                    "type": "string",
+                    "description": "Local backend executable; empty uses the build default. Reopen the workspace after changing."
+                },
                 "modal": {
                     "type": "boolean"
                 },

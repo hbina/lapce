@@ -1,11 +1,9 @@
 use std::rc::Rc;
 
 use floem::{
-    View, ViewId,
-    action::show_context_menu,
+    View,
     event::{Event, EventListener, EventPropagation},
     kurbo::Size,
-    menu::{Menu, MenuItem},
     reactive::{SignalGet, SignalUpdate, SignalWith, create_rw_signal},
     style::CursorStyle,
     views::{
@@ -14,15 +12,12 @@ use floem::{
         stack, svg, tab,
     },
 };
-use lapce_rpc::terminal::TermId;
 
 use super::kind::PanelKind;
 use crate::{
     app::clickable_icon,
-    command::{InternalCommand, LapceWorkbenchCommand},
+    command::LapceWorkbenchCommand,
     config::{color::LapceColor, icon::LapceIcons},
-    debug::RunDebugMode,
-    listener::Listener,
     terminal::{
         panel::TerminalPanelData, tab::TerminalTabData, view::terminal_view,
     },
@@ -70,48 +65,19 @@ fn terminal_tab_header(window_tab_data: Rc<WindowTabData>) -> impl View {
             |(_, tab)| tab.terminal_tab_id,
             move |(index, tab)| {
                 let terminal = terminal.clone();
-                let local_terminal = terminal.clone();
                 let terminal_tab_id = tab.terminal_tab_id;
 
                 let title = {
                     let tab = tab.clone();
                     move || {
                         let terminal = tab.active_terminal(true);
-                        let run_debug = terminal.as_ref().map(|t| t.run_debug);
-                        if let Some(run_debug) = run_debug {
-                            if let Some(name) = run_debug.with(|run_debug| {
-                                run_debug.as_ref().map(|r| r.config.name.clone())
-                            }) {
-                                return name;
-                            }
-                        }
-
                         let title = terminal.map(|t| t.title);
                         let title = title.map(|t| t.get());
                         title.unwrap_or_default()
                     }
                 };
 
-                let svg_string = move || {
-                    let terminal = tab.active_terminal(true);
-                    let run_debug = terminal.as_ref().map(|t| t.run_debug);
-                    if let Some(run_debug) = run_debug {
-                        if let Some((mode, stopped)) = run_debug.with(|run_debug| {
-                            run_debug.as_ref().map(|r| (r.mode, r.stopped))
-                        }) {
-                            let svg = match (mode, stopped) {
-                                (RunDebugMode::Run, false) => LapceIcons::START,
-                                (RunDebugMode::Run, true) => LapceIcons::RUN_ERRORS,
-                                (RunDebugMode::Debug, false) => LapceIcons::DEBUG,
-                                (RunDebugMode::Debug, true) => {
-                                    LapceIcons::DEBUG_DISCONNECT
-                                }
-                            };
-                            return svg;
-                        }
-                    }
-                    LapceIcons::TERMINAL
-                };
+                let svg_string = || LapceIcons::TERMINAL;
                 stack((
                     container({
                         stack((
@@ -200,7 +166,6 @@ fn terminal_tab_header(window_tab_data: Rc<WindowTabData>) -> impl View {
                             tab_info.update(|tab| {
                                 tab.active = index.get_untracked();
                             });
-                            local_terminal.update_debug_active_term();
                         }
                     },
                 )
@@ -268,7 +233,6 @@ fn terminal_tab_header(window_tab_data: Rc<WindowTabData>) -> impl View {
 fn terminal_tab_split(
     terminal_panel_data: TerminalPanelData,
     terminal_tab_data: TerminalTabData,
-    tab_index: usize,
 ) -> impl View {
     let config = terminal_panel_data.common.config;
     let internal_command = terminal_panel_data.common.internal_command;
@@ -294,28 +258,14 @@ fn terminal_tab_split(
                     terminal.term_id,
                     terminal.raw.read_only(),
                     terminal.mode.read_only(),
-                    terminal.run_debug.read_only(),
                     terminal_panel_data,
                     terminal.launch_error,
                     internal_command,
                     workspace.clone(),
                 );
-                let view_id = terminal_view.id();
-                let have_task = terminal.run_debug.get_untracked().is_some();
                 terminal_view
                     .on_event_cont(EventListener::PointerDown, move |_| {
                         active.set(index.get_untracked());
-                    })
-                    .on_secondary_click_stop(move |_| {
-                        if have_task {
-                            tab_secondary_click(
-                                internal_command,
-                                view_id,
-                                tab_index,
-                                index.get_untracked(),
-                                terminal.term_id,
-                            );
-                        }
                     })
                     .on_event(EventListener::PointerWheel, move |event| {
                         if let Event::PointerWheel(pointer_event) = event {
@@ -354,34 +304,7 @@ fn terminal_tab_content(window_tab_data: Rc<WindowTabData>) -> impl View {
         move || terminal.tab_info.with(|info| info.active),
         move || terminal.tab_info.with(|info| info.tabs.clone()),
         |(_, tab)| tab.terminal_tab_id,
-        move |(tab_index, tab)| {
-            terminal_tab_split(terminal.clone(), tab, tab_index.get_untracked())
-        },
+        move |(_, tab)| terminal_tab_split(terminal.clone(), tab),
     )
     .style(|s| s.size_pct(100.0, 100.0))
-}
-
-fn tab_secondary_click(
-    internal_command: Listener<InternalCommand>,
-    view_id: ViewId,
-    tab_index: usize,
-    terminal_index: usize,
-    term_id: TermId,
-) {
-    let mut menu = Menu::new("");
-    menu = menu
-        .entry(MenuItem::new("Stop").action(move || {
-            internal_command.send(InternalCommand::StopTerminal { term_id });
-        }))
-        .entry(MenuItem::new("Restart").action(move || {
-            internal_command.send(InternalCommand::RestartTerminal { term_id });
-        }))
-        .entry(MenuItem::new("Clear All").action(move || {
-            internal_command.send(InternalCommand::ClearTerminalBuffer {
-                view_id,
-                tab_index,
-                terminal_index,
-            });
-        }));
-    show_context_menu(menu, None);
 }

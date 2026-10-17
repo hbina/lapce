@@ -4,6 +4,16 @@ use structdesc::FieldNames;
 #[derive(FieldNames, Debug, Clone, Deserialize, Serialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub struct CoreConfig {
+    #[serde(default)]
+    #[field_names(
+        desc = "Local backend executable; empty uses the build default. Requires reopening the workspace."
+    )]
+    pub backend_executable: String,
+    #[serde(default)]
+    #[field_names(
+        desc = "Shared backend Unix socket for this workspace; overrides the executable. Reopen the workspace after changing."
+    )]
+    pub backend_socket: String,
     #[field_names(desc = "Enable modal editing (Vim like)")]
     pub modal: bool,
     #[field_names(desc = "Set the color theme of Lapce")]
@@ -11,7 +21,7 @@ pub struct CoreConfig {
     #[field_names(desc = "Set the icon theme of Lapce")]
     pub icon_theme: String,
     #[field_names(
-        desc = "Enable customised titlebar and disable OS native one (Linux, BSD, Windows)"
+        desc = "Enable customised titlebar and disable the native titlebar"
     )]
     pub custom_titlebar: bool,
     #[field_names(

@@ -92,37 +92,7 @@ fn file_view(
 
     let diagnostics = create_rw_signal(im::Vector::new());
     create_effect(move |_| {
-        let span = diagnostic_data.diagnostics_span.get();
-        let d = if !span.is_empty() {
-            span.iter()
-                .filter_map(|(iv, diag)| {
-                    if diag.severity == Some(severity) {
-                        Some(EditorDiagnostic {
-                            range: Some((iv.start, iv.end)),
-                            diagnostic: diag.to_owned(),
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect::<im::Vector<EditorDiagnostic>>()
-        } else {
-            let diagnostics = diagnostic_data.diagnostics.get();
-            let diagnostics: im::Vector<EditorDiagnostic> = diagnostics
-                .into_iter()
-                .filter_map(|d| {
-                    if d.severity == Some(severity) {
-                        Some(EditorDiagnostic {
-                            range: None,
-                            diagnostic: d,
-                        })
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            diagnostics
-        };
+        let d = diagnostic_data.entries(severity, true);
         diagnostics.set(d);
     });
 

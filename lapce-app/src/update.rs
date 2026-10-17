@@ -30,7 +30,7 @@ pub fn get_latest_release() -> Result<ReleaseInfo> {
         _ => "https://api.github.com/repos/lapce/lapce/releases/latest",
     };
 
-    let resp = lapce_proxy::get_url(url, Some("Lapce"))?;
+    let resp = lapce_services::http::get_url(url, Some("Lapce"))?;
     if !resp.status().is_success() {
         return Err(anyhow!("get release info failed {}", resp.text()?));
     }
@@ -55,24 +55,17 @@ pub fn get_latest_release() -> Result<ReleaseInfo> {
 pub fn download_release(release: &ReleaseInfo) -> Result<PathBuf> {
     let dir =
         Directory::updates_directory().ok_or_else(|| anyhow!("no directory"))?;
-    let name = match std::env::consts::OS {
-        "macos" => "Lapce-macos.dmg",
-        "linux" => match std::env::consts::ARCH {
-            "aarch64" => "lapce-linux-arm64.tar.gz",
-            "x86_64" => "lapce-linux-amd64.tar.gz",
-            _ => return Err(anyhow!("arch not supported")),
-        },
-        #[cfg(feature = "portable")]
-        "windows" => "Lapce-windows-portable.zip",
-        #[cfg(not(feature = "portable"))]
-        "windows" => "Lapce-windows.msi",
-        _ => return Err(anyhow!("os not supported")),
+    let name = match std::env::consts::ARCH {
+        "aarch64" => "lapce-linux-arm64.tar.gz",
+        "x86_64" => "lapce-linux-amd64.tar.gz",
+        _ => return Err(anyhow!("arch not supported")),
     };
     let file_path = dir.join(name);
 
     for asset in &release.assets {
         if asset.name == name {
-            let mut resp = lapce_proxy::get_url(&asset.browser_download_url, None)?;
+            let mut resp =
+                lapce_services::http::get_url(&asset.browser_download_url, None)?;
             if !resp.status().is_success() {
                 return Err(anyhow!("download file error {}", resp.text()?));
             }

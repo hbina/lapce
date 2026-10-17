@@ -1,0 +1,27 @@
+[package]
+name = "lapce-engine"
+description = "Headless Lapce editor behavior"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+rust-version = { workspace = true }
+
+[dependencies]
+im = { workspace = true }
+indexmap = { workspace = true }
+nucleo = "0.5.0"
+parking_lot = { workspace = true }
+anyhow = { workspace = true }
+lapce-core = { workspace = true }
+lapce-rpc = { workspace = true }
+lapce-xi-rope = { workspace = true }
+lsp-types = { workspace = true }
+once_cell = { workspace = true }
+regex = { workspace = true }
+serde = { workspace = true }
+
+[dev-dependencies]
+lapce-services = { workspace = true }
+tempfile = { workspace = true }
+lapce-client = { workspace = true, default-features = false }
+serde_json = { workspace = true }

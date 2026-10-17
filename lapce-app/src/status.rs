@@ -6,15 +6,13 @@ use std::{
 use floem::{
     View,
     event::EventPropagation,
-    reactive::{
-        Memo, ReadSignal, RwSignal, SignalGet, SignalUpdate, SignalWith, create_memo,
-    },
+    reactive::{Memo, ReadSignal, RwSignal, SignalGet, SignalUpdate, create_memo},
     style::{AlignItems, CursorStyle, Display},
     views::{Decorators, dyn_stack, label, stack, svg},
 };
 use indexmap::IndexMap;
 use lapce_core::mode::{Mode, VisualMode};
-use lsp_types::{DiagnosticSeverity, ProgressToken};
+use lsp_types::ProgressToken;
 
 use crate::{
     app::clickable_icon,
@@ -44,15 +42,9 @@ pub fn status(
         let mut errors = 0;
         let mut warnings = 0;
         for (_, diagnostics) in diagnostics.get().iter() {
-            for diagnostic in diagnostics.diagnostics.get().iter() {
-                if let Some(severity) = diagnostic.severity {
-                    match severity {
-                        DiagnosticSeverity::ERROR => errors += 1,
-                        DiagnosticSeverity::WARNING => warnings += 1,
-                        _ => (),
-                    }
-                }
-            }
+            let (file_errors, file_warnings) = diagnostics.counts();
+            errors += file_errors;
+            warnings += file_warnings;
         }
         (errors, warnings)
     });

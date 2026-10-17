@@ -4,7 +4,7 @@ use floem::{
     View,
     event::{Event, EventListener},
     ext_event::create_ext_action,
-    reactive::{RwSignal, Scope, SignalGet, SignalUpdate, SignalWith},
+    reactive::{RwSignal, Scope, SignalGet, SignalUpdate},
     style::CursorStyle,
     views::{
         Decorators, clip, dyn_stack, editor::id::EditorId, empty, label, stack, svg,
@@ -55,7 +55,7 @@ impl DiffEditorInfo {
             let common = data.common.clone();
             move |content: &DocContent| match content {
                 DocContent::File { path, .. } => {
-                    let (doc, _) = data.get_doc(path.clone(), None);
+                    let (doc, _) = data.get_doc(path.clone());
                     doc
                 }
                 DocContent::Local => {

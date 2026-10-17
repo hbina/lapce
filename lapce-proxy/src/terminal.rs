@@ -74,9 +74,10 @@ impl Terminal {
 
         setup_env();
 
+        let dimensions = lapce_rpc::terminal::TerminalSize::clamp(width, height);
         let size = WindowSize {
-            num_lines: height as u16,
-            num_cols: width as u16,
+            num_lines: dimensions.rows,
+            num_cols: dimensions.columns,
             cell_width: 1,
             cell_height: 1,
         };

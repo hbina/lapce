@@ -17,7 +17,6 @@ use floem::{
 };
 
 use super::{
-    debug_view::debug_panel,
     global_search_view::global_search_panel,
     kind::PanelKind,
     plugin_view::plugin_panel,
@@ -490,9 +489,8 @@ fn panel_view(
                 PanelKind::Problem => {
                     problem_panel(window_tab_data.clone(), position).into_any()
                 }
-                PanelKind::Debug => {
-                    debug_panel(window_tab_data.clone(), position).into_any()
-                }
+                // Legacy persisted panel kinds are filtered from PanelData.
+                PanelKind::Debug => empty().into_any(),
                 PanelKind::CallHierarchy => {
                     show_hierarchy_panel(window_tab_data.clone(), position)
                         .into_any()

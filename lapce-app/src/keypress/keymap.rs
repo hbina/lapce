@@ -98,12 +98,7 @@ impl KeyMapPress {
             keys.push_str("AltGr+");
         }
         if self.mods.meta() {
-            let keyname = match std::env::consts::OS {
-                "macos" => "Cmd+",
-                "windows" => "Win+",
-                _ => "Meta+",
-            };
-            keys.push_str(keyname);
+            keys.push_str("Meta+");
         }
         if self.mods.shift() {
             keys.push_str("Shift+");
@@ -594,11 +589,7 @@ impl Display for KeyMapKey {
                         f.write_str("AudioVolumeUp")
                     }
                     PhysicalKey::Code(KeyCode::WakeUp) => f.write_str("WakeUp"),
-                    PhysicalKey::Code(KeyCode::Meta) => match std::env::consts::OS {
-                        "macos" => f.write_str("Cmd"),
-                        "windows" => f.write_str("Win"),
-                        _ => f.write_str("Meta"),
-                    },
+                    PhysicalKey::Code(KeyCode::Meta) => f.write_str("Meta"),
                     PhysicalKey::Code(KeyCode::Hyper) => f.write_str("Hyper"),
                     PhysicalKey::Code(KeyCode::Turbo) => f.write_str("Turbo"),
                     PhysicalKey::Code(KeyCode::Abort) => f.write_str("Abort"),

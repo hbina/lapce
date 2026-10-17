@@ -50,10 +50,9 @@ for _cmd in tar gzip uname; do
   fi
 done
 
-# Currently only linux/darwin are supported
+# Only Linux backends are supported
 case $(uname -s) in
   Linux) os_name=linux ;;
-  Darwin) os_name=darwin ;;
   *)
     printf '[ERROR] unsupported os\n'
     exit 1

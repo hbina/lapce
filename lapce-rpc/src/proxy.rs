@@ -3,7 +3,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
 };
 
@@ -27,7 +27,7 @@ use crate::{
     RequestId, RpcError, RpcMessage,
     buffer::BufferId,
     dap_types::{self, DapId, RunDebugConfig, SourceBreakpoint, ThreadId},
-    file::{FileNodeItem, PathObject},
+    file::{DirectoryEntry, PathObject},
     file_line::FileLine,
     plugin::{PluginId, VoltInfo, VoltMetadata},
     source_control::FileDiff,
@@ -67,7 +67,38 @@ pub enum PathRequest {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "method", content = "params")]
 pub enum ProxyRequest {
+    GitCheckout {
+        reference: String,
+    },
+    GitDiscardFilesChanges {
+        files: Vec<PathBuf>,
+    },
+    GitDiscardWorkspaceChanges {},
+    GitInit {},
+
+    GitCommit {
+        message: String,
+        diffs: Vec<FileDiff>,
+    },
+    ApplyResourceOperation {
+        operation: crate::resource::ResourceOperation,
+    },
     NewBuffer {
+        buffer_id: BufferId,
+        path: PathBuf,
+    },
+    /// Read the current server-side text and revision without reopening the file.
+    GetBuffer {
+        path: PathBuf,
+    },
+    /// An acknowledged edit. `rev` must be exactly the current revision + 1.
+    UpdateBuffer {
+        buffer_id: BufferId,
+        path: PathBuf,
+        delta: RopeDelta,
+        rev: u64,
+    },
+    CloseBuffer {
         buffer_id: BufferId,
         path: PathBuf,
     },
@@ -183,6 +214,7 @@ pub enum ProxyRequest {
         path: PathRequest,
     },
     Save {
+        buffer_id: BufferId,
         rev: u64,
         path: PathBuf,
         /// Whether to create the parent directories if they do not exist.
@@ -209,10 +241,6 @@ pub enum ProxyRequest {
         existing_path: PathBuf,
         new_path: PathBuf,
     },
-    RenamePath {
-        from: PathBuf,
-        to: PathBuf,
-    },
     TestCreateAtPath {
         path: PathBuf,
     },
@@ -233,6 +261,66 @@ pub enum ProxyRequest {
     },
 }
 
+impl ProxyRequest {
+    /// Navigation services available to every frontend of the read-only browser.
+    /// Buffer updates are reserved for validating externally changed disk text.
+    pub fn allowed_in_code_browser(&self) -> bool {
+        use ProxyRequest::*;
+        match self {
+            NewBuffer { .. }
+            | GetBuffer { .. }
+            | CloseBuffer { .. }
+            | UpdateBuffer { .. }
+            | BufferHead { .. }
+            | GlobalSearch { .. }
+            | GetHover { .. }
+            | GetSignature { .. }
+            | GetSelectionRange { .. }
+            | GitGetRemoteFileUrl { .. }
+            | GetReferences { .. }
+            | GotoImplementation { .. }
+            | GetDefinition { .. }
+            | ShowCallHierarchy { .. }
+            | CallHierarchyIncoming { .. }
+            | GetTypeDefinition { .. }
+            | GetInlayHints { .. }
+            | GetSemanticTokens { .. }
+            | LspFoldingRange { .. }
+            | GetDocumentSymbols { .. }
+            | GetWorkspaceSymbols { .. }
+            | GetOpenFilesContent { .. }
+            | GetFiles { .. }
+            | ReadDir { .. }
+            | ReferencesResolve { .. }
+            | GetDocumentHighlights { .. } => true,
+            GitCheckout { .. }
+            | GitDiscardFilesChanges { .. }
+            | GitDiscardWorkspaceChanges { .. }
+            | GitInit { .. }
+            | GitCommit { .. }
+            | ApplyResourceOperation { .. }
+            | CompletionResolve { .. }
+            | CodeActionResolve { .. }
+            | GetInlineCompletions { .. }
+            | PrepareRename { .. }
+            | Rename { .. }
+            | GetCodeActions { .. }
+            | GetCodeLens { .. }
+            | GetCodeLensResolve { .. }
+            | GetDocumentFormatting { .. }
+            | Save { .. }
+            | SaveBufferAs { .. }
+            | CreateFile { .. }
+            | CreateDirectory { .. }
+            | TrashPath { .. }
+            | DuplicatePath { .. }
+            | TestCreateAtPath { .. }
+            | DapVariable { .. }
+            | DapGetScopes { .. } => false,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "method", content = "params")]
@@ -243,7 +331,10 @@ pub enum ProxyNotification {
         /// Paths to extra plugins that should be loaded
         extra_plugin_paths: Vec<PathBuf>,
         plugin_configurations: HashMap<String, HashMap<String, serde_json::Value>>,
+        /// Legacy wire placeholders for older proxies; no session ownership depends on them.
+        #[serde(default)]
         window_id: usize,
+        #[serde(default)]
         tab_id: usize,
     },
     OpenFileChanged {
@@ -263,11 +354,6 @@ pub enum ProxyNotification {
         request_id: usize,
         path: PathBuf,
         position: Position,
-    },
-    Update {
-        path: PathBuf,
-        delta: RopeDelta,
-        rev: u64,
     },
     UpdatePluginConfigs {
         configs: HashMap<String, HashMap<String, serde_json::Value>>,
@@ -291,18 +377,6 @@ pub enum ProxyNotification {
     EnableVolt {
         volt: VoltInfo,
     },
-    GitCommit {
-        message: String,
-        diffs: Vec<FileDiff>,
-    },
-    GitCheckout {
-        reference: String,
-    },
-    GitDiscardFilesChanges {
-        files: Vec<PathBuf>,
-    },
-    GitDiscardWorkspaceChanges {},
-    GitInit {},
     LspCancel {
         id: i32,
     },
@@ -368,20 +442,35 @@ pub enum ProxyNotification {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "method", content = "params")]
 pub enum ProxyResponse {
+    ResourceOperationResponse {
+        changed: bool,
+    },
     GitGetRemoteFileUrl {
         file_url: String,
     },
     NewBufferResponse {
         content: String,
         read_only: bool,
+        #[serde(default)]
+        rev: u64,
+    },
+    BufferSnapshot {
+        buffer_id: BufferId,
+        path: PathBuf,
+        content: String,
+        read_only: bool,
+        rev: u64,
+    },
+    BufferUpdated {
+        rev: u64,
     },
     BufferHeadResponse {
         version: String,
         content: String,
     },
     ReadDirResponse {
-        dir: FileNodeItem,
-        items: Vec<FileNodeItem>,
+        dir: DirectoryEntry,
+        items: Vec<DirectoryEntry>,
     },
     CompletionResolveResponse {
         item: Box<CompletionItem>,
@@ -489,7 +578,7 @@ pub type ProxyMessage = RpcMessage<ProxyRequest, ProxyNotification, ProxyRespons
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReadDirResponse {
-    pub items: HashMap<PathBuf, FileNodeItem>,
+    pub items: HashMap<PathBuf, DirectoryEntry>,
 }
 
 pub trait ProxyCallback: Send + FnOnce(Result<ProxyResponse, RpcError>) {}
@@ -525,6 +614,7 @@ pub struct ProxyRpcHandler {
     rx: Receiver<ProxyRpc>,
     id: Arc<AtomicU64>,
     pending: Arc<Mutex<HashMap<u64, ResponseHandler>>>,
+    disconnected: Arc<AtomicBool>,
 }
 
 impl ProxyRpcHandler {
@@ -535,6 +625,7 @@ impl ProxyRpcHandler {
             rx,
             id: Arc::new(AtomicU64::new(0)),
             pending: Arc::new(Mutex::new(HashMap::new())),
+            disconnected: Arc::new(AtomicBool::new(false)),
         }
     }
 
@@ -562,13 +653,64 @@ impl ProxyRpcHandler {
         }
     }
 
-    fn request_common(&self, request: ProxyRequest, rh: ResponseHandler) {
+    fn request_common(
+        &self,
+        request: ProxyRequest,
+        rh: ResponseHandler,
+    ) -> RequestId {
         let id = self.id.fetch_add(1, Ordering::Relaxed);
+        {
+            let mut pending = self.pending.lock();
+            if self.disconnected.load(Ordering::Acquire) {
+                drop(pending);
+                rh.invoke(Err(Self::disconnected_error()));
+                return id;
+            }
+            pending.insert(id, rh);
+        }
+        if self.tx.send(ProxyRpc::Request(id, request)).is_err() {
+            self.handle_response(id, Err(Self::disconnected_error()));
+        }
+        id
+    }
 
-        self.pending.lock().insert(id, rh);
+    fn disconnected_error() -> RpcError {
+        RpcError {
+            code: -32001,
+            message: "backend disconnected".into(),
+        }
+    }
 
-        if let Err(err) = self.tx.send(ProxyRpc::Request(id, request)) {
-            tracing::error!("{:?}", err);
+    /// Fail outstanding requests when the transport or dispatcher stops.
+    pub fn disconnect(&self) {
+        let pending = {
+            let mut pending = self.pending.lock();
+            self.disconnected.store(true, Ordering::Release);
+            std::mem::take(&mut *pending)
+        };
+        for (_, handler) in pending {
+            handler.invoke(Err(Self::disconnected_error()));
+        }
+    }
+
+    /// A bounded synchronous request for headless clients. UI callers should
+    /// continue to use callbacks rather than block their event loop.
+    pub fn request_timeout(
+        &self,
+        request: ProxyRequest,
+        timeout: std::time::Duration,
+    ) -> Result<ProxyResponse, RpcError> {
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        let id = self.request_common(request, ResponseHandler::Chan(tx));
+        match rx.recv_timeout(timeout) {
+            Ok(result) => result,
+            Err(error) => {
+                self.pending.lock().remove(&id);
+                Err(RpcError {
+                    code: -32002,
+                    message: error.to_string(),
+                })
+            }
         }
     }
 
@@ -588,7 +730,7 @@ impl ProxyRpcHandler {
         request: ProxyRequest,
         f: impl ProxyCallback + 'static,
     ) {
-        self.request_common(request, ResponseHandler::Callback(Box::new(f)))
+        self.request_common(request, ResponseHandler::Callback(Box::new(f)));
     }
 
     pub fn handle_response(
@@ -610,18 +752,6 @@ impl ProxyRpcHandler {
 
     pub fn lsp_cancel(&self, id: i32) {
         self.notification(ProxyNotification::LspCancel { id });
-    }
-
-    pub fn git_init(&self) {
-        self.notification(ProxyNotification::GitInit {});
-    }
-
-    pub fn git_commit(&self, message: String, diffs: Vec<FileDiff>) {
-        self.notification(ProxyNotification::GitCommit { message, diffs });
-    }
-
-    pub fn git_checkout(&self, reference: String) {
-        self.notification(ProxyNotification::GitCheckout { reference });
     }
 
     pub fn install_volt(&self, volt: VoltInfo) {
@@ -657,16 +787,14 @@ impl ProxyRpcHandler {
         disabled_volts: Vec<VoltID>,
         extra_plugin_paths: Vec<PathBuf>,
         plugin_configurations: HashMap<String, HashMap<String, serde_json::Value>>,
-        window_id: usize,
-        tab_id: usize,
     ) {
         self.notification(ProxyNotification::Initialize {
             workspace,
             disabled_volts,
             extra_plugin_paths,
             plugin_configurations,
-            window_id,
-            tab_id,
+            window_id: 1,
+            tab_id: 1,
         });
     }
 
@@ -707,10 +835,11 @@ impl ProxyRpcHandler {
     }
 
     pub fn terminal_resize(&self, term_id: TermId, width: usize, height: usize) {
+        let size = crate::terminal::TerminalSize::clamp(width, height);
         self.notification(ProxyNotification::TerminalResize {
             term_id,
-            width,
-            height,
+            width: size.columns as usize,
+            height: size.rows as usize,
         });
     }
 
@@ -756,15 +885,6 @@ impl ProxyRpcHandler {
             },
             f,
         );
-    }
-
-    pub fn rename_path(
-        &self,
-        from: PathBuf,
-        to: PathBuf,
-        f: impl ProxyCallback + 'static,
-    ) {
-        self.request_async(ProxyRequest::RenamePath { from, to }, f);
     }
 
     pub fn test_create_at_path(
@@ -817,6 +937,7 @@ impl ProxyRpcHandler {
 
     pub fn save(
         &self,
+        buffer_id: BufferId,
         rev: u64,
         path: PathBuf,
         create_parents: bool,
@@ -824,6 +945,7 @@ impl ProxyRpcHandler {
     ) {
         self.request_async(
             ProxyRequest::Save {
+                buffer_id,
                 rev,
                 path,
                 create_parents,
@@ -1117,23 +1239,11 @@ impl ProxyRpcHandler {
         );
     }
 
-    pub fn update(&self, path: PathBuf, delta: RopeDelta, rev: u64) {
-        self.notification(ProxyNotification::Update { path, delta, rev });
-    }
-
     pub fn update_plugin_configs(
         &self,
         configs: HashMap<String, HashMap<String, serde_json::Value>>,
     ) {
         self.notification(ProxyNotification::UpdatePluginConfigs { configs });
-    }
-
-    pub fn git_discard_files_changes(&self, files: Vec<PathBuf>) {
-        self.notification(ProxyNotification::GitDiscardFilesChanges { files });
-    }
-
-    pub fn git_discard_workspace_changes(&self) {
-        self.notification(ProxyNotification::GitDiscardWorkspaceChanges {});
     }
 
     pub fn get_selection_range(
@@ -1243,5 +1353,47 @@ impl ProxyRpcHandler {
 impl Default for ProxyRpcHandler {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod connection_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn timeout_removes_request_and_late_response_is_ignored() {
+        let rpc = ProxyRpcHandler::new();
+        let error = rpc
+            .request_timeout(ProxyRequest::GetOpenFilesContent {}, Duration::ZERO)
+            .unwrap_err();
+        assert_eq!(error.code, -32002);
+        assert!(rpc.pending.lock().is_empty());
+        let ProxyRpc::Request(id, _) = rpc.rx().recv().unwrap() else {
+            panic!("expected request");
+        };
+        rpc.handle_response(id, Ok(ProxyResponse::Success {}));
+        assert!(rpc.pending.lock().is_empty());
+    }
+
+    #[test]
+    fn disconnect_fails_pending_and_future_requests() {
+        let rpc = ProxyRpcHandler::new();
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        rpc.request_async(ProxyRequest::GetOpenFilesContent {}, move |result| {
+            tx.send(result).unwrap();
+        });
+        rpc.disconnect();
+        assert_eq!(rx.recv().unwrap().unwrap_err().code, -32001);
+        assert!(rpc.pending.lock().is_empty());
+        assert_eq!(
+            rpc.request_timeout(
+                ProxyRequest::GetOpenFilesContent {},
+                Duration::from_secs(1)
+            )
+            .unwrap_err()
+            .code,
+            -32001
+        );
     }
 }

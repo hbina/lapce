@@ -102,7 +102,7 @@ pub(super) fn panic_hook() {
 }
 
 pub fn error_notification(title: &str, msg: &str) {
-    let res = std::process::Command::new("notify-send")
+    let _ = std::process::Command::new("notify-send")
         .args([
             "-a",
             "dev.lapce.lapce",

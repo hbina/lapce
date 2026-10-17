@@ -130,15 +130,6 @@ pub struct EditorConfig {
         desc = "If modal mode should have relative line numbers (though, not in insert mode)"
     )]
     pub modal_mode_relative_line_numbers: bool,
-    #[field_names(
-        desc = "Whether it should format the document on save (if there is an available formatter)"
-    )]
-    pub format_on_save: bool,
-
-    #[field_names(
-        desc = "Whether newlines should be automatically converted to the current line ending"
-    )]
-    pub normalize_line_endings: bool,
 
     #[field_names(desc = "If matching brackets are highlighted")]
     pub highlight_matching_brackets: bool,
@@ -214,14 +205,6 @@ pub struct EditorConfig {
     pub render_whitespace: RenderWhitespace,
     #[field_names(desc = "Whether the editor show indent guide.")]
     pub show_indent_guide: bool,
-    #[field_names(
-        desc = "Set the auto save delay (in milliseconds), Set to 0 to completely disable"
-    )]
-    pub autosave_interval: u64,
-    #[field_names(
-        desc = "Whether the document should be formatted when an autosave is triggered (required Format on Save)"
-    )]
-    pub format_on_autosave: bool,
     #[field_names(
         desc = "If enabled the cursor treats leading soft tabs as if they are hard tabs."
     )]

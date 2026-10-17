@@ -48,15 +48,15 @@ use lapce_core::{
     rope_text_pos::RopeTextPosition,
     selection::{InsertDrift, SelRegion, Selection},
 };
-use lapce_rpc::{buffer::BufferId, plugin::PluginId, proxy::ProxyResponse};
+pub use lapce_engine::view_state::DocumentViewState as EditorInfo;
+use lapce_rpc::{buffer::BufferId, proxy::ProxyResponse};
 use lapce_xi_rope::{Rope, RopeDelta, Transformer};
 use lsp_types::{
-    CodeActionResponse, CompletionItem, CompletionTextEdit, GotoDefinitionResponse,
-    HoverContents, InlayHint, InlayHintLabel, InlineCompletionTriggerKind, Location,
-    MarkedString, MarkupKind, Range, TextEdit,
+    CompletionItem, CompletionTextEdit, HoverContents, InlayHint, InlayHintLabel,
+    InlineCompletionTriggerKind, Location, MarkedString, MarkupKind, Range,
+    TextEdit,
 };
 use nucleo::Utf32Str;
-use serde::{Deserialize, Serialize};
 use view::StickyHeaderInfo;
 
 use self::{
@@ -99,27 +99,17 @@ pub enum InlineFindDirection {
     Right,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
-pub struct EditorInfo {
-    pub content: DocContent,
-    pub unsaved: Option<String>,
-    pub offset: usize,
-    pub scroll_offset: (f64, f64),
-    pub confirmed: Option<bool>,
+pub trait EditorInfoExt {
+    fn to_data(&self, data: MainSplitData, editor_tab_id: EditorTabId) -> EditorId;
 }
 
-impl EditorInfo {
-    pub fn to_data(
-        &self,
-        data: MainSplitData,
-        editor_tab_id: EditorTabId,
-    ) -> EditorId {
+impl EditorInfoExt for EditorInfo {
+    fn to_data(&self, data: MainSplitData, editor_tab_id: EditorTabId) -> EditorId {
         let editors = &data.editors;
         let common = data.common.clone();
         match &self.content {
             DocContent::File { path, .. } => {
-                let (doc, new_doc) =
-                    data.get_doc(path.clone(), self.unsaved.clone());
+                let (doc, new_doc) = data.get_doc(path.clone());
                 let editor = editors.make_from_doc(
                     data.scope,
                     doc,
@@ -356,19 +346,19 @@ impl EditorData {
         let offset = self.cursor().get_untracked().offset();
         let scroll_offset = self.viewport().get_untracked().origin();
         let doc = self.doc();
-        let is_pristine = doc.is_pristine();
-        let unsaved = if is_pristine {
+        let content = doc.content.get_untracked();
+        let unsaved = if content.is_file() || doc.is_pristine() {
             None
         } else {
-            Some(doc.buffer.with_untracked(|b| b.to_string()))
+            Some(doc.buffer.with_untracked(|buffer| buffer.to_string()))
         };
-        EditorInfo {
-            content: self.doc().content.get_untracked(),
+        EditorInfo::capture(
+            content,
             unsaved,
             offset,
-            scroll_offset: (scroll_offset.x, scroll_offset.y),
-            confirmed: Some(self.confirmed.get_untracked()),
-        }
+            (scroll_offset.x, scroll_offset.y),
+            Some(self.confirmed.get_untracked()),
+        )
     }
 
     pub fn cursor(&self) -> RwSignal<Cursor> {
@@ -771,6 +761,15 @@ impl EditorData {
         _count: Option<usize>,
         mods: Modifiers,
     ) -> CommandExecuted {
+        if matches!(
+            cmd,
+            FocusCommand::Save
+                | FocusCommand::SaveWithoutFormatting
+                | FocusCommand::FormatDocument
+                | FocusCommand::Rename
+        ) {
+            return CommandExecuted::No;
+        }
         // TODO(minor): Evaluate whether we should split this into subenums,
         // such as actions specific to the actual editor pane, movement, and list movement.
         let prev_completion_index = self
@@ -1036,9 +1035,7 @@ impl EditorData {
             FocusCommand::GotoDefinition => {
                 self.go_to_definition();
             }
-            FocusCommand::ShowCodeActions => {
-                self.show_code_actions(false);
-            }
+            FocusCommand::ShowCodeActions => {}
             FocusCommand::SearchWholeWordForward => {
                 self.search_whole_word_forward(mods);
             }
@@ -1048,15 +1045,9 @@ impl EditorData {
             FocusCommand::SearchBackward => {
                 self.search_backward(mods);
             }
-            FocusCommand::Save => {
-                self.save(true, || {});
-            }
-            FocusCommand::SaveWithoutFormatting => {
-                self.save(false, || {});
-            }
-            FocusCommand::FormatDocument => {
-                self.format();
-            }
+            FocusCommand::Save
+            | FocusCommand::SaveWithoutFormatting
+            | FocusCommand::FormatDocument => {}
             FocusCommand::InlineFindLeft => {
                 self.inline_find.set(Some(InlineFindDirection::Left));
             }
@@ -1075,9 +1066,7 @@ impl EditorData {
                     self.inline_find(direction, &c);
                 }
             }
-            FocusCommand::Rename => {
-                self.rename();
-            }
+            FocusCommand::Rename => {}
             FocusCommand::ClearSearch => {
                 self.clear_search();
             }
@@ -1085,13 +1074,9 @@ impl EditorData {
                 self.search();
             }
             FocusCommand::FocusFindEditor => {
-                self.common.find.replace_focus.set(false);
+                self.find_focus.set(true);
             }
-            FocusCommand::FocusReplaceEditor => {
-                if self.common.find.replace_active.get_untracked() {
-                    self.common.find.replace_focus.set(true);
-                }
-            }
+            FocusCommand::FocusReplaceEditor => {}
             FocusCommand::InlineCompletionSelect => {
                 self.select_inline_completion();
             }
@@ -1240,21 +1225,9 @@ impl EditorData {
 
     fn go_to_definition(&self) {
         let doc = self.doc();
-        let path = match if doc.loaded() {
-            doc.content.with_untracked(|c| c.path().cloned())
-        } else {
-            None
-        } {
-            Some(path) => path,
-            None => return,
-        };
-
         let offset = self.cursor().with_untracked(|c| c.offset());
-        let (start_position, position) = doc.buffer.with_untracked(|buffer| {
-            let start_offset = buffer.prev_code_boundary(offset);
-            let start_position = buffer.offset_to_position(start_offset);
-            let position = buffer.offset_to_position(offset);
-            (start_position, position)
+        let start_position = doc.buffer.with_untracked(|buffer| {
+            buffer.offset_to_position(buffer.prev_code_boundary(offset))
         });
 
         enum DefinitionOrReference {
@@ -1293,37 +1266,18 @@ impl EditorData {
                 }
             }
         });
-        let proxy = self.common.proxy.clone();
-        self.common.proxy.get_definition(
-            offset,
-            path.clone(),
-            position,
+        let source_doc = doc.clone();
+        self.doc().request_navigation(
+            lapce_engine::navigation::NavigationQuery::Definition { offset },
             move |result| {
                 if let Ok(ProxyResponse::GetDefinitionResponse {
                     definition, ..
                 }) = result
                 {
-                    if let Some(location) = match definition {
-                        GotoDefinitionResponse::Scalar(location) => Some(location),
-                        GotoDefinitionResponse::Array(locations) => {
-                            if !locations.is_empty() {
-                                Some(locations[0].clone())
-                            } else {
-                                None
-                            }
-                        }
-                        GotoDefinitionResponse::Link(location_links) => {
-                            let location_link = location_links[0].clone();
-                            Some(Location {
-                                uri: location_link.target_uri,
-                                range: location_link.target_selection_range,
-                            })
-                        }
-                    } {
+                    if let Some(location) = lapce_engine::navigation::first_definition(definition) {
                         if location.range.start == start_position {
-                            proxy.get_references(
-                                path.clone(),
-                                position,
+                            source_doc.request_navigation(
+                                lapce_engine::navigation::NavigationQuery::References { offset },
                                 move |result| {
                                     if let Ok(
                                         ProxyResponse::GetReferencesResponse {
@@ -1400,9 +1354,8 @@ impl EditorData {
             start: _start_position,
             end: position,
         };
-        self.common.proxy.show_call_hierarchy(
-            path,
-            position,
+        self.doc().request_document(
+            lapce_rpc::proxy::ProxyRequest::ShowCallHierarchy { path, position },
             create_ext_action(self.scope, move |result| {
                 if let Ok(ProxyResponse::ShowCallHierarchyResponse {
                     items, ..
@@ -1434,23 +1387,7 @@ impl EditorData {
     }
 
     pub fn find_reference(&self, window_tab_data: WindowTabData) {
-        let doc = self.doc();
-        let path = match if doc.loaded() {
-            doc.content.with_untracked(|c| c.path().cloned())
-        } else {
-            None
-        } {
-            Some(path) => path,
-            None => return,
-        };
-
         let offset = self.cursor().with_untracked(|c| c.offset());
-        let (_start_position, position) = doc.buffer.with_untracked(|buffer| {
-            let start_offset = buffer.prev_code_boundary(offset);
-            let start_position = buffer.offset_to_position(start_offset);
-            let position = buffer.offset_to_position(offset);
-            (start_position, position)
-        });
         let scope = window_tab_data.scope;
         let update_implementation = create_ext_action(self.scope, {
             let window_tab_data = window_tab_data.clone();
@@ -1467,9 +1404,8 @@ impl EditorData {
             }
         });
         let proxy = self.common.proxy.clone();
-        self.common.proxy.get_references(
-            path,
-            position,
+        self.doc().request_navigation(
+            lapce_engine::navigation::NavigationQuery::References { offset },
             create_ext_action(self.scope, move |result| {
                 if let Ok(ProxyResponse::GetReferencesResponse { references }) =
                     result
@@ -1490,23 +1426,7 @@ impl EditorData {
     }
 
     pub fn go_to_implementation(&self, window_tab_data: WindowTabData) {
-        let doc = self.doc();
-        let path = match if doc.loaded() {
-            doc.content.with_untracked(|c| c.path().cloned())
-        } else {
-            None
-        } {
-            Some(path) => path,
-            None => return,
-        };
-
         let offset = self.cursor().with_untracked(|c| c.offset());
-        let (_start_position, position) = doc.buffer.with_untracked(|buffer| {
-            let start_offset = buffer.prev_code_boundary(offset);
-            let start_position = buffer.offset_to_position(start_offset);
-            let position = buffer.offset_to_position(offset);
-            (start_position, position)
-        });
         let scope = window_tab_data.scope;
         let update_implementation = create_ext_action(self.scope, {
             let window_tab_data = window_tab_data.clone();
@@ -1523,9 +1443,8 @@ impl EditorData {
             }
         });
         let proxy = self.common.proxy.clone();
-        self.common.proxy.go_to_implementation(
-            path,
-            position,
+        self.doc().request_navigation(
+            lapce_engine::navigation::NavigationQuery::Implementation { offset },
             create_ext_action(self.scope, {
                 move |result| {
                     if let Ok(ProxyResponse::GotoImplementationResponse {
@@ -1576,7 +1495,9 @@ impl EditorData {
             return;
         };
 
-        if let Err(err) = item.apply(self, start_offset) {
+        if let Err(err) =
+            crate::inline_completion::apply_item(&item, self, start_offset)
+        {
             tracing::error!("{:?}", err);
         }
     }
@@ -1669,10 +1590,18 @@ impl EditorData {
             });
         }
 
-        let path2 = path.clone();
+        let revision = doc.rev();
+        let request_id = inline_completion
+            .try_update(|completion| {
+                completion.state.begin(path.clone(), offset, revision)
+            })
+            .unwrap();
         let send = create_ext_action(
             self.scope,
             move |items: Vec<lsp_types::InlineCompletionItem>| {
+                if doc.rev() != revision {
+                    return;
+                }
                 let items = doc.buffer.with_untracked(|buffer| {
                     items
                         .into_iter()
@@ -1680,18 +1609,19 @@ impl EditorData {
                         .collect()
                 });
                 inline_completion.update(|c| {
-                    c.set_items(items, offset, path2);
-                    c.update_doc(&doc, offset);
+                    if c.receive(request_id, revision, items) {
+                        c.update_doc(&doc, offset);
+                    }
                 });
             },
         );
 
-        inline_completion.update(|c| c.status = InlineCompletionStatus::Started);
-
-        self.common.proxy.get_inline_completions(
-            path,
-            position,
-            trigger_kind,
+        self.doc().request_document(
+            lapce_rpc::proxy::ProxyRequest::GetInlineCompletions {
+                path,
+                position,
+                trigger_kind,
+            },
             move |res| {
                 if let Ok(ProxyResponse::GetInlineCompletions {
                     completions: items,
@@ -1748,9 +1678,11 @@ impl EditorData {
                         tracing::error!("{:?}", err);
                     }
                 });
-                self.common.proxy.completion_resolve(
-                    item.plugin_id,
-                    item.item.clone(),
+                doc.request_document(
+                    lapce_rpc::proxy::ProxyRequest::CompletionResolve {
+                        plugin_id: item.plugin_id,
+                        completion_item: Box::new(item.item.clone()),
+                    },
                     move |result| {
                         let item =
                             if let Ok(ProxyResponse::CompletionResolveResponse {
@@ -1835,7 +1767,7 @@ impl EditorData {
                     });
                     completion.request(
                         self.id(),
-                        &self.common.proxy,
+                        &doc,
                         path.clone(),
                         "".to_string(),
                         start_pos,
@@ -1846,13 +1778,7 @@ impl EditorData {
                     let position = doc
                         .buffer
                         .with_untracked(|buffer| buffer.offset_to_position(offset));
-                    completion.request(
-                        self.id(),
-                        &self.common.proxy,
-                        path,
-                        input,
-                        position,
-                    );
+                    completion.request(self.id(), &doc, path, input, position);
                 }
             });
             let cursor_offset = self.cursor().with_untracked(|c| c.offset());
@@ -1866,18 +1792,16 @@ impl EditorData {
 
         let doc = self.doc();
         self.common.completion.update(|completion| {
-            completion.path.clone_from(&path);
-            completion.offset = start_offset;
-            completion.input.clone_from(&input);
-            completion.status = CompletionStatus::Started;
-            completion.input_items.clear();
-            completion.request_id += 1;
+            completion
+                .state
+                .begin(path.clone(), start_offset, input.clone());
+            completion.active.set(0);
             let start_pos = doc
                 .buffer
                 .with_untracked(|buffer| buffer.offset_to_position(start_offset));
             completion.request(
                 self.id(),
-                &self.common.proxy,
+                &doc,
                 path.clone(),
                 "".to_string(),
                 start_pos,
@@ -1887,13 +1811,7 @@ impl EditorData {
                 let position = doc
                     .buffer
                     .with_untracked(|buffer| buffer.offset_to_position(offset));
-                completion.request(
-                    self.id(),
-                    &self.common.proxy,
-                    path,
-                    input,
-                    position,
-                );
+                completion.request(self.id(), &doc, path, input, position);
             }
         });
     }
@@ -2079,13 +1997,21 @@ impl EditorData {
         selection: &Selection,
         edits: &[(impl AsRef<Selection>, &str)],
     ) {
+        let doc = self.doc();
+        let result = match doc.do_raw_edit(edits, EditType::Completion) {
+            Some(e) => e,
+            None => return,
+        };
+        self.finish_raw_edit(selection, result);
+    }
+
+    fn finish_raw_edit(
+        &self,
+        selection: &Selection,
+        (text, delta, inval_lines): (Rope, RopeDelta, InvalLines),
+    ) {
         let mut cursor = self.cursor().get_untracked();
         let doc = self.doc();
-        let (text, delta, inval_lines) =
-            match doc.do_raw_edit(edits, EditType::Completion) {
-                Some(e) => e,
-                None => return,
-            };
         let selection = selection.apply_delta(&delta, true, InsertDrift::Default);
         let old_cursor = cursor.mode.clone();
         doc.buffer.update(|buffer| {
@@ -2124,7 +2050,6 @@ impl EditorData {
         for (_, delta, _) in deltas {
             // self.inactive_apply_delta(delta);
             self.update_snippet_offset(delta);
-            // self.update_breakpoints(delta);
         }
         // self.update_signature();
     }
@@ -2224,197 +2149,6 @@ impl EditorData {
         }
     }
 
-    pub fn get_code_actions(&self) {
-        let doc = self.doc();
-        let path = match if doc.loaded() {
-            doc.content.with_untracked(|c| c.path().cloned())
-        } else {
-            None
-        } {
-            Some(path) => path,
-            None => return,
-        };
-
-        let offset = self.cursor().with_untracked(|c| c.offset());
-        let exists = doc
-            .code_actions()
-            .with_untracked(|c| c.contains_key(&offset));
-
-        if exists {
-            return;
-        }
-
-        // insert some empty data, so that we won't make the request again
-        doc.code_actions().update(|c| {
-            c.insert(offset, (PluginId(0), im::Vector::new()));
-        });
-
-        let (position, rev, diagnostics) = doc.buffer.with_untracked(|buffer| {
-            let position = buffer.offset_to_position(offset);
-            let rev = doc.rev();
-
-            // Get the diagnostics for the current line, which the LSP might use to inform
-            // what code actions are available (such as fixes for the diagnostics).
-            let diagnostics = doc
-                .diagnostics()
-                .diagnostics_span
-                .get_untracked()
-                .iter_chunks(offset..offset)
-                .filter(|(iv, _diag)| iv.start <= offset && iv.end >= offset)
-                .map(|(_iv, diag)| diag)
-                .cloned()
-                .collect();
-
-            (position, rev, diagnostics)
-        });
-
-        let send = create_ext_action(
-            self.scope,
-            move |resp: (PluginId, CodeActionResponse)| {
-                if doc.rev() == rev {
-                    doc.code_actions().update(|c| {
-                        c.insert(offset, (resp.0, resp.1.into()));
-                    });
-                }
-            },
-        );
-
-        self.common.proxy.get_code_actions(
-            path,
-            position,
-            diagnostics,
-            move |result| {
-                if let Ok(ProxyResponse::GetCodeActionsResponse {
-                    plugin_id,
-                    resp,
-                }) = result
-                {
-                    send((plugin_id, resp))
-                }
-            },
-        );
-    }
-
-    pub fn show_code_actions(&self, mouse_click: bool) {
-        let offset = self.cursor().with_untracked(|c| c.offset());
-        let doc = self.doc();
-        let code_actions = doc
-            .code_actions()
-            .with_untracked(|c| c.get(&offset).cloned());
-        if let Some((plugin_id, code_actions)) = code_actions {
-            if !code_actions.is_empty() {
-                self.common.internal_command.send(
-                    InternalCommand::ShowCodeActions {
-                        offset,
-                        mouse_click,
-                        plugin_id,
-                        code_actions,
-                    },
-                );
-            }
-        }
-    }
-
-    fn do_save(&self, after_action: impl FnOnce() + 'static) {
-        self.doc().save(after_action);
-    }
-
-    pub fn save(
-        &self,
-        allow_formatting: bool,
-        after_action: impl FnOnce() + 'static,
-    ) {
-        let doc = self.doc();
-        let is_pristine = doc.is_pristine();
-        let content = doc.content.get_untracked();
-
-        if let DocContent::Scratch { .. } = &content {
-            self.common
-                .internal_command
-                .send(InternalCommand::SaveScratchDoc2 { doc });
-            return;
-        }
-
-        if content.path().is_some() && is_pristine {
-            return;
-        }
-
-        let config = self.common.config.get_untracked();
-        let DocContent::File { path, .. } = content else {
-            return;
-        };
-
-        // If we are disallowing formatting (such as due to a manual save without formatting),
-        // then we skip normalizing line endings as a common reason for that is large files.
-        // (but if the save is typical, even if config format_on_save is false, we normalize)
-        if allow_formatting && config.editor.normalize_line_endings {
-            self.run_edit_command(&EditCommand::NormalizeLineEndings);
-        }
-
-        let rev = doc.rev();
-        let format_on_save = allow_formatting && config.editor.format_on_save;
-        if format_on_save {
-            let editor = self.clone();
-            let send = create_ext_action(self.scope, move |result| {
-                if let Ok(Ok(ProxyResponse::GetDocumentFormatting { edits })) =
-                    result
-                {
-                    let current_rev = editor.doc().rev();
-                    if current_rev == rev {
-                        editor.do_text_edit(&edits);
-                    }
-                }
-                editor.do_save(after_action);
-            });
-
-            let (tx, rx) = crossbeam_channel::bounded(1);
-            let proxy = self.common.proxy.clone();
-            std::thread::spawn(move || {
-                proxy.get_document_formatting(path, move |result| {
-                    if let Err(err) = tx.send(result) {
-                        tracing::error!("{:?}", err);
-                    }
-                });
-                let result = rx.recv_timeout(std::time::Duration::from_secs(1));
-                send(result);
-            });
-        } else {
-            self.do_save(after_action);
-        }
-    }
-
-    pub fn format(&self) {
-        let doc = self.doc();
-        let rev = doc.rev();
-        let content = doc.content.get_untracked();
-
-        if let DocContent::File { path, .. } = content {
-            let editor = self.clone();
-            let send = create_ext_action(self.scope, move |result| {
-                if let Ok(Ok(ProxyResponse::GetDocumentFormatting { edits })) =
-                    result
-                {
-                    let current_rev = editor.doc().rev();
-                    if current_rev == rev {
-                        editor.do_text_edit(&edits);
-                    }
-                }
-            });
-
-            let (tx, rx) = crossbeam_channel::bounded(1);
-            let proxy = self.common.proxy.clone();
-            std::thread::spawn(move || {
-                proxy.get_document_formatting(path, move |result| {
-                    if let Err(err) = tx.send(result) {
-                        tracing::error!("{:?}", err);
-                    }
-                });
-                let result = rx.recv_timeout(std::time::Duration::from_secs(1));
-                send(result);
-            });
-        }
-    }
-
     fn search_whole_word_forward(&self, mods: Modifiers) {
         let offset = self.cursor().with_untracked(|c| c.offset());
         let (word, buffer) = self.doc().buffer.with_untracked(|buffer| {
@@ -2469,36 +2203,6 @@ impl EditorData {
         }
     }
 
-    fn replace_next(&self, text: &str) {
-        let offset = self.cursor().with_untracked(|c| c.offset());
-        let buffer = self.doc().buffer.with_untracked(|buffer| buffer.clone());
-        let next = self.common.find.next(buffer.text(), offset, false, true);
-
-        if let Some((start, end)) = next {
-            let selection = Selection::region(start, end);
-            self.do_edit(&selection, &[(selection.clone(), text)]);
-        }
-    }
-
-    fn replace_all(&self, text: &str) {
-        let offset = self.cursor().with_untracked(|c| c.offset());
-
-        self.doc().update_find();
-
-        let edits: Vec<(Selection, &str)> = self
-            .doc()
-            .find_result
-            .occurrences
-            .get_untracked()
-            .regions()
-            .iter()
-            .map(|region| (Selection::region(region.start, region.end), text))
-            .collect();
-        if !edits.is_empty() {
-            self.do_edit(&Selection::caret(offset), &edits);
-        }
-    }
-
     pub fn save_doc_position(&self) {
         let doc = self.doc();
         let path = match if doc.loaded() {
@@ -2520,87 +2224,6 @@ impl EditorData {
             cursor_offset,
             scroll_offset,
         );
-    }
-
-    fn rename(&self) {
-        let doc = self.doc();
-        let path = match if doc.loaded() {
-            doc.content.with_untracked(|c| c.path().cloned())
-        } else {
-            None
-        } {
-            Some(path) => path,
-            None => return,
-        };
-
-        let offset = self.cursor().with_untracked(|c| c.offset());
-        let (position, rev) = doc
-            .buffer
-            .with_untracked(|buffer| (buffer.offset_to_position(offset), doc.rev()));
-
-        let cursor = self.cursor();
-        let buffer = doc.buffer;
-        let internal_command = self.common.internal_command;
-        let local_path = path.clone();
-        let send = create_ext_action(self.scope, move |result| {
-            if let Ok(ProxyResponse::PrepareRename { resp }) = result {
-                if buffer.with_untracked(|buffer| buffer.rev()) != rev {
-                    return;
-                }
-
-                if cursor.with_untracked(|c| c.offset()) != offset {
-                    return;
-                }
-
-                let (start, _end, position, placeholder) =
-                    buffer.with_untracked(|buffer| match resp {
-                        lsp_types::PrepareRenameResponse::Range(range) => (
-                            buffer.offset_of_position(&range.start),
-                            buffer.offset_of_position(&range.end),
-                            range.start,
-                            None,
-                        ),
-                        lsp_types::PrepareRenameResponse::RangeWithPlaceholder {
-                            range,
-                            placeholder,
-                        } => (
-                            buffer.offset_of_position(&range.start),
-                            buffer.offset_of_position(&range.end),
-                            range.start,
-                            Some(placeholder),
-                        ),
-                        lsp_types::PrepareRenameResponse::DefaultBehavior {
-                            ..
-                        } => {
-                            let start = buffer.prev_code_boundary(offset);
-                            let position = buffer.offset_to_position(start);
-                            (
-                                start,
-                                buffer.next_code_boundary(offset),
-                                position,
-                                None,
-                            )
-                        }
-                    });
-                let placeholder = placeholder.unwrap_or_else(|| {
-                    buffer.with_untracked(|buffer| {
-                        let (start, end) = buffer.select_word(offset);
-                        buffer.slice_to_cow(start..end).to_string()
-                    })
-                });
-                internal_command.send(InternalCommand::StartRename {
-                    path: local_path.clone(),
-                    placeholder,
-                    start,
-                    position,
-                });
-            }
-        });
-        self.common
-            .proxy
-            .prepare_rename(path, position, move |result| {
-                send(result);
-            });
     }
 
     #[instrument]
@@ -2659,7 +2282,6 @@ impl EditorData {
             .send(InternalCommand::Search { pattern });
         self.common.find.visual.set(true);
         self.find_focus.set(true);
-        self.common.find.replace_focus.set(false);
     }
 
     pub fn pointer_down(&self, pointer_event: &PointerInputEvent) {
@@ -2710,7 +2332,7 @@ impl EditorData {
                     }
                 }
 
-                if (pointer_event.modifiers.control()) {
+                if pointer_event.modifiers.control() {
                     let rs = self.find_hint(pointer_event.pos);
                     match rs {
                         FindHintRs::NoMatchBreak
@@ -2892,81 +2514,36 @@ impl EditorData {
             self.single_click(pointer_event);
         }
 
-        let (path, is_file) = doc.content.with_untracked(|content| match content {
-            DocContent::File { path, .. } => {
-                (Some(path.to_path_buf()), path.is_file())
-            }
-            DocContent::Local
-            | DocContent::History(_)
-            | DocContent::Scratch { .. } => (None, false),
-        });
+        let is_file = doc.content.with_untracked(DocContent::is_file);
         let mut menu = Menu::new("");
         let mut cmds = if is_file {
-            if path
-                .as_ref()
-                .and_then(|x| x.file_name().and_then(|x| x.to_str()))
-                .map(|x| x == "run.toml")
-                .unwrap_or_default()
-            {
-                vec![
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::RevealInPanel,
-                    )),
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::RevealInFileExplorer,
-                    )),
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::SourceControlOpenActiveFileRemoteUrl,
-                    )),
-                    None,
-                    Some(CommandKind::Edit(EditCommand::ClipboardCut)),
-                    Some(CommandKind::Edit(EditCommand::ClipboardCopy)),
-                    Some(CommandKind::Edit(EditCommand::ClipboardPaste)),
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::AddRunDebugConfig,
-                    )),
-                    None,
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::PaletteCommand,
-                    )),
-                ]
-            } else {
-                vec![
-                    Some(CommandKind::Focus(FocusCommand::GotoDefinition)),
-                    Some(CommandKind::Focus(FocusCommand::GotoTypeDefinition)),
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::ShowCallHierarchy,
-                    )),
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::FindReferences,
-                    )),
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::GoToImplementation,
-                    )),
-                    Some(CommandKind::Focus(FocusCommand::Rename)),
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::RunInTerminal,
-                    )),
-                    None,
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::RevealInPanel,
-                    )),
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::RevealInFileExplorer,
-                    )),
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::SourceControlOpenActiveFileRemoteUrl,
-                    )),
-                    None,
-                    Some(CommandKind::Edit(EditCommand::ClipboardCut)),
-                    Some(CommandKind::Edit(EditCommand::ClipboardCopy)),
-                    Some(CommandKind::Edit(EditCommand::ClipboardPaste)),
-                    None,
-                    Some(CommandKind::Workbench(
-                        LapceWorkbenchCommand::PaletteCommand,
-                    )),
-                ]
-            }
+            vec![
+                Some(CommandKind::Focus(FocusCommand::GotoDefinition)),
+                Some(CommandKind::Focus(FocusCommand::GotoTypeDefinition)),
+                Some(CommandKind::Workbench(
+                    LapceWorkbenchCommand::ShowCallHierarchy,
+                )),
+                Some(CommandKind::Workbench(
+                    LapceWorkbenchCommand::FindReferences,
+                )),
+                Some(CommandKind::Workbench(
+                    LapceWorkbenchCommand::GoToImplementation,
+                )),
+                None,
+                Some(CommandKind::Workbench(LapceWorkbenchCommand::RevealInPanel)),
+                Some(CommandKind::Workbench(
+                    LapceWorkbenchCommand::RevealInFileExplorer,
+                )),
+                Some(CommandKind::Workbench(
+                    LapceWorkbenchCommand::SourceControlOpenActiveFileRemoteUrl,
+                )),
+                None,
+                Some(CommandKind::Edit(EditCommand::ClipboardCopy)),
+                None,
+                Some(CommandKind::Workbench(
+                    LapceWorkbenchCommand::PaletteCommand,
+                )),
+            ]
         } else {
             vec![
                 Some(CommandKind::Edit(EditCommand::ClipboardCut)),
@@ -2986,6 +2563,9 @@ impl EditorData {
         let lapce_command = self.common.lapce_command;
         for cmd in cmds {
             if let Some(cmd) = cmd {
+                if is_file && !cmd.available_in_code_browser() {
+                    continue;
+                }
                 menu = menu.entry(
                     MenuItem::new(cmd.desc().unwrap_or_else(|| cmd.str())).action(
                         move || {
@@ -3005,17 +2585,6 @@ impl EditorData {
 
     #[instrument]
     fn update_hover(&self, offset: usize) {
-        let doc = self.doc();
-        let path = doc
-            .content
-            .with_untracked(|content| content.path().cloned());
-        let position = doc
-            .buffer
-            .with_untracked(|buffer| buffer.offset_to_position(offset));
-        let path = match path {
-            Some(path) => path,
-            None => return,
-        };
         let config = self.common.config;
         let hover_data = self.common.hover.clone();
         let editor_id = self.id();
@@ -3028,9 +2597,12 @@ impl EditorData {
                 hover_data.active.set(true);
             }
         });
-        self.common.proxy.get_hover(0, path, position, |resp| {
-            send(resp);
-        });
+        self.doc().request_navigation(
+            lapce_engine::navigation::NavigationQuery::Hover { offset },
+            |resp| {
+                send(resp);
+            },
+        );
     }
 
     // reset the doc inside and move cursor back
@@ -3302,13 +2874,8 @@ impl KeyPressFocus for EditorData {
             Condition::SearchFocus => {
                 self.common.find.visual.get_untracked()
                     && self.find_focus.get_untracked()
-                    && !self.common.find.replace_focus.get_untracked()
             }
-            Condition::ReplaceFocus => {
-                self.common.find.visual.get_untracked()
-                    && self.find_focus.get_untracked()
-                    && self.common.find.replace_focus.get_untracked()
-            }
+            Condition::ReplaceFocus => false,
             Condition::SearchActive => {
                 if self.common.config.get_untracked().core.modal
                     && self.cursor().with_untracked(|c| !c.is_normal())
@@ -3335,23 +2902,13 @@ impl KeyPressFocus for EditorData {
                 CommandKind::Edit(_)
                 | CommandKind::Move(_)
                 | CommandKind::MultiSelection(_) => {
-                    if self.common.find.replace_focus.get_untracked() {
-                        self.common.internal_command.send(
-                            InternalCommand::ReplaceEditorCommand {
-                                command: command.clone(),
-                                count,
-                                mods,
-                            },
-                        );
-                    } else {
-                        self.common.internal_command.send(
-                            InternalCommand::FindEditorCommand {
-                                command: command.clone(),
-                                count,
-                                mods,
-                            },
-                        );
-                    }
+                    self.common.internal_command.send(
+                        InternalCommand::FindEditorCommand {
+                            command: command.clone(),
+                            count,
+                            mods,
+                        },
+                    );
                     return CommandExecuted::Yes;
                 }
                 _ => {}
@@ -3407,16 +2964,9 @@ impl KeyPressFocus for EditorData {
     fn receive_char(&self, c: &str) {
         if self.common.find.visual.get_untracked() && self.find_focus.get_untracked()
         {
-            // find/relace editor receive char
-            if self.common.find.replace_focus.get_untracked() {
-                self.common.internal_command.send(
-                    InternalCommand::ReplaceEditorReceiveChar { s: c.to_string() },
-                );
-            } else {
-                self.common.internal_command.send(
-                    InternalCommand::FindEditorReceiveChar { s: c.to_string() },
-                );
-            }
+            self.common
+                .internal_command
+                .send(InternalCommand::FindEditorReceiveChar { s: c.to_string() });
         } else {
             // normal editor receive char
             if self.get_mode() == Mode::Insert {

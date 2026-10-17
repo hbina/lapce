@@ -1,13 +1,10 @@
 pub mod about;
 pub mod alert;
 pub mod app;
-pub mod code_action;
-pub mod code_lens;
 pub mod command;
 pub mod completion;
 pub mod config;
 pub mod db;
-pub mod debug;
 pub mod doc;
 pub mod editor;
 pub mod editor_tab;
@@ -29,7 +26,6 @@ pub mod palette;
 pub mod panel;
 pub mod plugin;
 pub mod proxy;
-pub mod rename;
 pub mod settings;
 pub mod snippet;
 pub mod source_control;
@@ -45,3 +41,6 @@ pub mod web_link;
 pub mod window;
 pub mod window_tab;
 pub mod workspace;
+
+pub mod reactive_model;
+pub mod workspace_actions;

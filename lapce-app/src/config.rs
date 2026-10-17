@@ -8,8 +8,8 @@ use ::core::slice;
 use floem::{peniko::Color, prelude::palette::css};
 use itertools::Itertools;
 use lapce_core::directory::Directory;
-use lapce_proxy::plugin::wasi::find_all_volts;
 use lapce_rpc::plugin::VoltID;
+use lapce_services::plugin::find_all_volts;
 use lsp_types::{CompletionItemKind, SymbolKind};
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
@@ -333,7 +333,7 @@ impl LapceConfig {
         self.resolve_theme(workspace);
     }
 
-    /// Set the active icon theme.  
+    /// Set the active icon theme.
     /// Note that this does not save the config.
     pub fn set_icon_theme(&mut self, workspace: &LapceWorkspace, theme: &str) {
         self.core.icon_theme = theme.to_string();
@@ -443,7 +443,7 @@ impl LapceConfig {
         Some((name.to_lowercase(), (name, config)))
     }
 
-    /// Load the given theme by its contents.  
+    /// Load the given theme by its contents.
     /// Returns `(name, theme fields)`
     fn load_color_theme_from_str(s: &str) -> Option<(String, config::Config)> {
         let config = config::Config::builder()
@@ -975,7 +975,7 @@ impl LapceConfig {
         Some(())
     }
 
-    /// Update the config file with the given edit.  
+    /// Update the config file with the given edit.
     /// This should be called whenever the configuration is changed, so that it is persisted.
     pub fn update_file(
         parent: &str,
@@ -1014,5 +1014,38 @@ impl LapceConfig {
         std::fs::write(path, main_table.to_string().as_bytes()).ok()?;
 
         Some(())
+    }
+}
+
+#[cfg(test)]
+mod read_only_settings_tests {
+    use super::*;
+    #[test]
+    fn legacy_save_settings_load_but_are_not_exposed_or_serialized() {
+        let editor = LapceConfig::default_lapce_config().editor;
+        let mut value = serde_json::to_value(&editor).unwrap();
+        let fields = [
+            "format-on-save",
+            "normalize-line-endings",
+            "autosave-interval",
+            "format-on-autosave",
+        ];
+        for field in fields {
+            assert!(value.get(field).is_none());
+            value
+                .as_object_mut()
+                .unwrap()
+                .insert(field.into(), serde_json::json!(true));
+        }
+        let loaded: EditorConfig = serde_json::from_value(value).unwrap();
+        let saved = serde_json::to_value(loaded).unwrap();
+        for field in fields {
+            assert!(saved.get(field).is_none());
+            assert!(
+                !EditorConfig::FIELDS
+                    .iter()
+                    .any(|name| name.replace('_', "-") == field)
+            );
+        }
     }
 }

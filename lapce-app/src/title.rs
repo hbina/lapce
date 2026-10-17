@@ -31,19 +31,9 @@ fn left(
     workbench_command: Listener<LapceWorkbenchCommand>,
     config: ReadSignal<Arc<LapceConfig>>,
     proxy_status: RwSignal<Option<ProxyStatus>>,
-    num_window_tabs: Memo<usize>,
 ) -> impl View {
     let is_local = workspace.kind.is_local();
-    let is_macos = false;
     stack((
-        empty().style(move |s| {
-            let should_hide = if is_macos {
-                num_window_tabs.get() > 1
-            } else {
-                true
-            };
-            s.width(75.0).apply_if(should_hide, |s| s.hide())
-        }),
         container(svg(move || config.get().ui_svg(LapceIcons::LOGO)).style(
             move |s| {
                 let config = config.get();
@@ -51,7 +41,7 @@ fn left(
                     .color(config.color(LapceColor::LAPCE_ICON_ACTIVE))
             },
         ))
-        .style(move |s| s.margin_horiz(10.0).apply_if(is_macos, |s| s.hide())),
+        .style(move |s| s.margin_horiz(10.0)),
         not_clickable_icon(
             || LapceIcons::MENU,
             || false,
@@ -60,11 +50,7 @@ fn left(
             config,
         )
         .popout_menu(move || window_menu(lapce_command, workbench_command))
-        .style(move |s| {
-            s.margin_left(4.0)
-                .margin_right(6.0)
-                .apply_if(is_macos, |s| s.hide())
-        }),
+        .style(move |s| s.margin_left(4.0).margin_right(6.0)),
         tooltip_label(
             config,
             container(svg(move || config.get().ui_svg(LapceIcons::REMOTE)).style(
@@ -266,21 +252,8 @@ fn middle(
                 .border_radius(6.0)
                 .background(config.color(LapceColor::EDITOR_BACKGROUND))
         }),
-        stack((
-            clickable_icon(
-                || LapceIcons::START,
-                move || {
-                    workbench_command.send(LapceWorkbenchCommand::PaletteRunAndDebug)
-                },
-                || false,
-                || false,
-                || "Run and Debug",
-                config,
-            )
-            .style(move |s| s.margin_horiz(6.0)),
-            drag_window_area(empty())
-                .style(|s| s.height_pct(100.0).flex_basis(0.0).flex_grow(1.0f32)),
-        ))
+        stack((drag_window_area(empty())
+            .style(|s| s.height_pct(100.0).flex_basis(0.0).flex_grow(1.0f32)),))
         .style(move |s| {
             s.flex_basis(0)
                 .flex_grow(1.0f32)
@@ -428,7 +401,6 @@ pub fn title(window_tab_data: Rc<WindowTabData>) -> impl View {
             workbench_command,
             config,
             proxy_status,
-            num_window_tabs,
         ),
         middle(
             workspace,
@@ -516,8 +488,7 @@ pub fn window_controls_view(
     ))
     .style(move |s| {
         s.apply_if(
-            false
-                || !config.get_untracked().core.custom_titlebar
+            !config.get_untracked().core.custom_titlebar
                 || (is_title && num_window_tabs.get() > 1),
             |s| s.hide(),
         )

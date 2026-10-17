@@ -52,10 +52,9 @@ use lsp_types::{
 use parking_lot::Mutex;
 use psp_types::{
     ExecuteProcess, ExecuteProcessParams, ExecuteProcessResult,
-    RegisterDebuggerType, RegisterDebuggerTypeParams, Request, SendLspNotification,
-    SendLspNotificationParams, SendLspRequest, SendLspRequestParams,
-    SendLspRequestResult, StartLspServer, StartLspServerParams,
-    StartLspServerResult,
+    RegisterDebuggerType, Request, SendLspNotification, SendLspNotificationParams,
+    SendLspRequest, SendLspRequestParams, SendLspRequestResult, StartLspServer,
+    StartLspServerParams, StartLspServerResult,
 };
 use serde::Serialize;
 use serde_json::Value;
@@ -331,7 +330,7 @@ impl PluginServerRpcHandler {
         }
     }
 
-    /// Send a notification.  
+    /// Send a notification.
     /// The callback is called when the function is actually sent.
     pub fn server_notification<P: Serialize>(
         &self,
@@ -632,8 +631,8 @@ pub struct PluginHostHandler {
     pub server_capabilities: ServerCapabilities,
     server_registrations: ServerRegistrations,
 
-    /// Language servers that this plugin has spawned.  
-    /// Note that these plugin ids could be 'dead' if the LSP died/exited.  
+    /// Language servers that this plugin has spawned.
+    /// Note that these plugin ids could be 'dead' if the LSP died/exited.
     spawned_lsp: HashMap<PluginId, SpawnedLspInfo>,
 }
 
@@ -984,16 +983,10 @@ impl PluginHostHandler {
                     stderr: Some(output.stderr),
                 });
             }
-            RegisterDebuggerType::METHOD => {
-                let params: RegisterDebuggerTypeParams =
-                    serde_json::from_value(serde_json::to_value(params)?)?;
-                self.catalog_rpc.register_debugger_type(
-                    params.debugger_type,
-                    params.program,
-                    params.args,
-                );
-                resp.send_null();
-            }
+            // Older plugins may register a debugger alongside their language
+            // server. Acknowledge the unused registration without storing or
+            // launching a debugger; language navigation continues to work.
+            RegisterDebuggerType::METHOD => resp.send_null(),
             StartLspServer::METHOD => {
                 let params: StartLspServerParams =
                     serde_json::from_value(serde_json::to_value(params)?)?;

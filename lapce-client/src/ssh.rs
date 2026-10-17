@@ -1,10 +1,10 @@
 use std::{path::Path, process::Command};
 
-use anyhow::Result;
+use anyhow::{Result, bail};
 use tracing::debug;
 
 use super::remote::Remote;
-use crate::{proxy::new_command, workspace::SshHost};
+use crate::{new_command, workspace::SshHost};
 
 pub struct SshRemote {
     pub ssh: SshHost,
@@ -35,13 +35,13 @@ impl Remote for SshRemote {
 
         let output = cmd
             .arg(local.as_ref())
-            .arg(dbg!(format!("{}:{remote}", self.ssh.user_host())))
+            .arg(format!("{}:{remote}", self.ssh.user_host()))
             .output()?;
 
         debug!("{}", String::from_utf8_lossy(&output.stderr));
         debug!("{}", String::from_utf8_lossy(&output.stdout));
 
-        Ok(())
+        check_upload_result(&output)
     }
 
     fn command_builder(&self) -> Command {
@@ -59,5 +59,33 @@ impl Remote for SshRemote {
         }
 
         cmd
+    }
+}
+
+fn check_upload_result(output: &std::process::Output) -> Result<()> {
+    if !output.status.success() {
+        bail!(
+            "SSH backend upload failed ({}): {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_upload_reports_status_and_remote_error() {
+        let output = Command::new("sh")
+            .args(["-c", "echo 'remote permission denied' >&2; exit 7"])
+            .output()
+            .unwrap();
+
+        let message = check_upload_result(&output).unwrap_err().to_string();
+        assert!(message.contains("remote permission denied"));
+        assert!(message.contains('7'));
     }
 }

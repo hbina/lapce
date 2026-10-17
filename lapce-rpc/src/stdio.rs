@@ -89,7 +89,12 @@ where
     Resp: DeserializeOwned,
 {
     let mut buf = String::new();
-    let _ = inp.read_line(&mut buf)?;
+    if inp.read_line(&mut buf)? == 0 {
+        return Err(io::Error::new(
+            io::ErrorKind::UnexpectedEof,
+            "RPC stream closed",
+        ));
+    }
     let value: Value = serde_json::from_str(&buf)?;
 
     match parse_value(value) {
@@ -139,4 +144,36 @@ where
         }
     };
     Ok(msg)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proxy::{
+        ProxyMessage, ProxyNotification, ProxyRequest, ProxyResponse,
+    };
+
+    #[test]
+    fn eof_terminates_transport() {
+        let error = read_msg::<_, ProxyRequest, ProxyNotification, ProxyResponse>(
+            &mut &b""[..],
+        )
+        .unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::UnexpectedEof);
+    }
+
+    #[test]
+    fn acknowledged_update_response_roundtrips_over_json() {
+        let mut bytes = Vec::new();
+        let message: ProxyMessage =
+            RpcMessage::Response(42, ProxyResponse::BufferUpdated { rev: 7 });
+        write_msg(&mut bytes, message).unwrap();
+        assert!(bytes.ends_with(b"\n"));
+        let decoded: ProxyMessage =
+            read_msg(&mut bytes.as_slice()).unwrap().unwrap();
+        assert!(matches!(
+            decoded,
+            RpcMessage::Response(42, ProxyResponse::BufferUpdated { rev: 7 })
+        ));
+    }
 }

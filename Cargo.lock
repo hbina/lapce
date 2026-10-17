@@ -3001,9 +3001,11 @@ dependencies = [
  "indexmap",
  "interprocess",
  "itertools 0.12.1",
+ "lapce-client",
  "lapce-core",
- "lapce-proxy",
+ "lapce-engine",
  "lapce-rpc",
+ "lapce-services",
  "lapce-xi-rope",
  "lsp-types",
  "notify",
@@ -3040,6 +3042,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "lapce-client"
+version = "0.4.6"
+dependencies = [
+ "anyhow",
+ "base64 0.21.7",
+ "crossbeam-channel",
+ "flate2",
+ "lapce-core",
+ "lapce-proxy",
+ "lapce-rpc",
+ "lapce-services",
+ "lapce-xi-rope",
+ "lsp-types",
+ "serde",
+ "serde_json",
+ "strum 0.27.2",
+ "strum_macros 0.27.2",
+ "tempfile",
+ "thiserror 1.0.69",
+ "tracing 0.2.0",
+]
+
+[[package]]
 name = "lapce-core"
 version = "0.4.6"
 dependencies = [
@@ -3068,6 +3093,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "lapce-engine"
+version = "0.4.6"
+dependencies = [
+ "anyhow",
+ "im",
+ "indexmap",
+ "lapce-client",
+ "lapce-core",
+ "lapce-rpc",
+ "lapce-services",
+ "lapce-xi-rope",
+ "lsp-types",
+ "nucleo",
+ "once_cell",
+ "parking_lot",
+ "regex",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "lapce-proxy"
 version = "0.4.6"
 dependencies = [
@@ -3090,6 +3137,7 @@ dependencies = [
  "jsonrpc-lite",
  "lapce-core",
  "lapce-rpc",
+ "lapce-services",
  "lapce-xi-rope",
  "libc",
  "lsp-types",
@@ -3126,6 +3174,7 @@ dependencies = [
  "lapce-xi-rope",
  "lsp-types",
  "parking_lot",
+ "percent-encoding",
  "serde",
  "serde_json",
  "tracing 0.2.0",
