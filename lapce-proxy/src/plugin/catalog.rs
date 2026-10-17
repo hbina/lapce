@@ -60,8 +60,23 @@ impl PluginCatalog {
             open_files: HashMap::new(),
         };
 
+        let native_workspace = plugin.workspace.clone();
+        let native_configurations = plugin.plugin_configurations.clone();
         thread::spawn(move || {
-            load_all_volts(plugin_rpc, &extra_plugin_paths, disabled_volts);
+            load_all_volts(plugin_rpc.clone(), &extra_plugin_paths, disabled_volts);
+            if let Err(error) = super::native::start(
+                native_workspace,
+                &native_configurations,
+                plugin_rpc.clone(),
+            ) {
+                plugin_rpc.core_rpc.show_message(
+                    "Language server startup failed".into(),
+                    lsp_types::ShowMessageParams {
+                        typ: lsp_types::MessageType::ERROR,
+                        message: error.to_string(),
+                    },
+                );
+            }
         });
 
         plugin

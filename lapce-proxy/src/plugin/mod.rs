@@ -1,5 +1,6 @@
 pub mod catalog;
 pub mod lsp;
+mod native;
 pub mod psp;
 pub mod wasi;
 

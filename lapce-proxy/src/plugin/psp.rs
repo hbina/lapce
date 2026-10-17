@@ -559,7 +559,7 @@ pub fn handle_plugin_server_message(
             let rpc = PluginServerRpc::HostRequest {
                 id: id.clone(),
                 method: value.get_method().unwrap().to_string(),
-                params: value.get_params().unwrap(),
+                params: value.get_params().unwrap_or(Params::None(())),
                 resp: ResponseSender::new(tx),
             };
             server_rpc.handle_rpc(rpc);
@@ -580,7 +580,7 @@ pub fn handle_plugin_server_message(
         Ok(value @ JsonRpc::Notification(_)) => {
             let rpc = PluginServerRpc::HostNotification {
                 method: value.get_method().unwrap().to_string(),
-                params: value.get_params().unwrap(),
+                params: value.get_params().unwrap_or(Params::None(())),
                 from: from.to_string(),
             };
             server_rpc.handle_rpc(rpc);
@@ -885,10 +885,17 @@ impl PluginHostHandler {
                     }
                 })
                 .unwrap_or((false, false));
-            return (should_send, include_text);
+            if should_send {
+                return (true, include_text);
+            }
         }
 
         if let Some(options) = self.server_registrations.save.as_ref() {
+            if options.filters.is_empty()
+                && self.document_supported(Some(language_id), Some(path))
+            {
+                return (true, options.include_text);
+            }
             for filter in options.filters.iter() {
                 if (filter.language_id.is_none()
                     || filter.language_id.as_deref() == Some(language_id))
