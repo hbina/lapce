@@ -194,11 +194,6 @@ impl ProxyHandler for Dispatcher {
                 #[allow(unused)]
                 let mut child_id = None;
 
-                #[cfg(target_os = "windows")]
-                {
-                    child_id = terminal.pty.child_watcher().pid().map(|x| x.get());
-                }
-                #[cfg(not(target_os = "windows"))]
                 {
                     child_id = Some(terminal.pty.child().id());
                 }
@@ -1327,17 +1322,6 @@ impl FileWatchNotifier {
     fn handle_open_file_fs_event(&self, event: notify::Event) {
         if event.kind.is_modify() || event.kind.is_remove() {
             for path in event.paths {
-                #[cfg(windows)]
-                if let Some(path_str) = path.to_str() {
-                    const PREFIX: &str = r"\\?\";
-                    if let Some(path_str) = path_str.strip_prefix(PREFIX) {
-                        let path = PathBuf::from(&path_str);
-                        self.proxy_rpc.notification(
-                            ProxyNotification::OpenFileChanged { path },
-                        );
-                        continue;
-                    }
-                }
                 self.proxy_rpc
                     .notification(ProxyNotification::OpenFileChanged { path });
             }

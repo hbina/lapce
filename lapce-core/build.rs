@@ -76,31 +76,6 @@ fn get_info() -> Result<ReleaseInfo> {
     Ok(release_info)
 }
 
-#[cfg(not(target_os = "linux"))]
-fn get_head() -> Option<String> {
-    let repo = match git2::Repository::discover(format!(
-        "{}/..",
-        env::var("CARGO_MANIFEST_DIR").ok()?
-    )) {
-        Ok(v) => v,
-        Err(err) => {
-            println!("cargo::warning=Failed to obtain git repo: {err}");
-            return None;
-        }
-    };
-    let reference = match repo.head() {
-        Ok(v) => v,
-        Err(err) => {
-            println!("cargo::warning=Failed to obtain head: {err}");
-            return None;
-        }
-    };
-    let commit = reference.target();
-    println!("cargo::warning=Commit found: {commit:?}");
-    commit.map(|s| s.to_string().split_at(7).0.to_owned())
-}
-
-#[cfg(target_os = "linux")]
 fn get_head() -> Option<String> {
     let cmd = std::process::Command::new("git")
         .args(["show", "--pretty=format:%h", "--no-patch"])

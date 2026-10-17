@@ -2710,10 +2710,7 @@ impl EditorData {
                     }
                 }
 
-                if (cfg!(target_os = "macos") && pointer_event.modifiers.meta())
-                    || (cfg!(not(target_os = "macos"))
-                        && pointer_event.modifiers.control())
-                {
+                if (pointer_event.modifiers.control()) {
                     let rs = self.find_hint(pointer_event.pos);
                     match rs {
                         FindHintRs::NoMatchBreak

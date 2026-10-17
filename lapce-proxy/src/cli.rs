@@ -98,42 +98,7 @@ mod tests {
     use crate::cli::PathObject;
 
     #[test]
-    #[cfg(windows)]
-    fn test_absolute_path() {
-        assert_eq!(
-            parse_file_line_column("C:\\Cargo.toml:55").unwrap(),
-            PathObject::new(PathBuf::from("C:\\Cargo.toml"), false, 55, 1),
-        );
-    }
 
-    #[test]
-    #[cfg(windows)]
-    fn test_relative_path() {
-        assert_eq!(
-            parse_file_line_column(".\\..\\Cargo.toml:55").unwrap(),
-            PathObject::new(
-                PathBuf::from(".\\..\\Cargo.toml").canonicalize().unwrap(),
-                false,
-                55,
-                1
-            ),
-        );
-    }
-
-    #[test]
-    #[cfg(windows)]
-    fn test_directory_looking_like_file() {
-        assert_eq!(
-            parse_file_line_column(".\\Cargo.toml\\").unwrap(),
-            PathObject::from_path(
-                env::current_dir().unwrap().join("Cargo.toml"),
-                false
-            ),
-        );
-    }
-
-    #[test]
-    #[cfg(unix)]
     fn test_absolute_path() {
         assert_eq!(
             parse_file_line_column("/tmp/Cargo.toml:55").unwrap(),
@@ -142,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
+
     fn test_relative_path() {
         assert_eq!(
             parse_file_line_column("./../Cargo.toml").unwrap(),
@@ -154,7 +119,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg(unix)]
+
     fn test_directory_looking_like_file() {
         assert_eq!(
             parse_file_line_column("./Cargo.toml/").unwrap(),

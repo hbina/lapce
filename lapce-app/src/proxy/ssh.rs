@@ -11,10 +11,6 @@ pub struct SshRemote {
 }
 
 impl SshRemote {
-    #[cfg(windows)]
-    const SSH_ARGS: &'static [&'static str] = &[];
-
-    #[cfg(unix)]
     const SSH_ARGS: &'static [&'static str] = &[
         "-o",
         "ControlMaster=auto",

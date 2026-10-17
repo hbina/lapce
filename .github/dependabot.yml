@@ -47,6 +47,3 @@ updates:
       tree-sitter:
         patterns:
           - "tree-sitter"
-      windows:
-        patterns:
-          - "windows*"

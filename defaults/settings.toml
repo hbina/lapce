@@ -72,9 +72,7 @@ font-size = 0
 line-height = 0
 
 [terminal.default-profile]
-macos = "default"
 linux = "default"
-windows = "default"
 
 [terminal.profiles]
 default = {}

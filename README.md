@@ -5,6 +5,8 @@
   </a>
 </h1>
 
+This fork supports Linux only. Windows, macOS and WSL are not supported.
+
 <h4 align="center">Lightning-fast And Powerful Code Editor</h4>
 
 <div align="center">
@@ -35,7 +37,7 @@ Lapce (IPA: /læps/) is written in pure Rust, with a UI in [Floem](https://githu
 
 ## Installation
 
-You can find pre-built releases for Windows, Linux and macOS [here](https://github.com/lapce/lapce/releases), or [installing with a package manager](docs/installing-with-package-manager.md).
+Build this Linux fork from source; upstream release binaries do not contain these changes.
 If you'd like to compile from source, you can find the [guide](docs/building-from-source.md).
 
 ## Contributing

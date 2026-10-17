@@ -1,5 +1,8 @@
 #![allow(clippy::manual_clamp)]
 
+#[cfg(not(target_os = "linux"))]
+compile_error!("This Lapce fork supports Linux only.");
+
 pub mod directory;
 pub mod encoding;
 pub mod language;

@@ -65,10 +65,7 @@ pub enum PaletteItemContent {
     SshHost {
         host: SshHost,
     },
-    #[cfg(windows)]
-    WslHost {
-        host: crate::workspace::WslHost,
-    },
+
     RunAndDebug {
         mode: RunDebugMode,
         config: RunDebugConfig,

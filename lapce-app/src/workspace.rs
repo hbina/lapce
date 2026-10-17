@@ -48,26 +48,10 @@ impl Display for SshHost {
     }
 }
 
-#[cfg(windows)]
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Hash)]
-pub struct WslHost {
-    pub host: String,
-}
-
-#[cfg(windows)]
-impl Display for WslHost {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.host)?;
-        Ok(())
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum LapceWorkspaceType {
     Local,
     RemoteSSH(SshHost),
-    #[cfg(windows)]
-    RemoteWSL(WslHost),
 }
 
 impl LapceWorkspaceType {
@@ -78,11 +62,7 @@ impl LapceWorkspaceType {
     pub fn is_remote(&self) -> bool {
         use LapceWorkspaceType::*;
 
-        #[cfg(not(windows))]
         return matches!(self, RemoteSSH(_));
-
-        #[cfg(windows)]
-        return matches!(self, RemoteSSH(_) | RemoteWSL(_));
     }
 }
 
@@ -92,10 +72,6 @@ impl std::fmt::Display for LapceWorkspaceType {
             LapceWorkspaceType::Local => f.write_str("Local"),
             LapceWorkspaceType::RemoteSSH(remote) => {
                 write!(f, "ssh://{remote}")
-            }
-            #[cfg(windows)]
-            LapceWorkspaceType::RemoteWSL(remote) => {
-                write!(f, "{remote} (WSL)")
             }
         }
     }
@@ -120,10 +96,6 @@ impl LapceWorkspace {
             LapceWorkspaceType::Local => String::new(),
             LapceWorkspaceType::RemoteSSH(remote) => {
                 format!(" [SSH: {}]", remote.host)
-            }
-            #[cfg(windows)]
-            LapceWorkspaceType::RemoteWSL(remote) => {
-                format!(" [WSL: {}]", remote.host)
             }
         };
         Some(format!("{path}{remote}"))

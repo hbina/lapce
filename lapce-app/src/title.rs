@@ -34,7 +34,7 @@ fn left(
     num_window_tabs: Memo<usize>,
 ) -> impl View {
     let is_local = workspace.kind.is_local();
-    let is_macos = cfg!(target_os = "macos");
+    let is_macos = false;
     stack((
         empty().style(move |s| {
             let should_hide = if is_macos {
@@ -102,15 +102,7 @@ fn left(
                     },
                 ));
             }
-            #[cfg(windows)]
-            {
-                menu = menu.entry(MenuItem::new("Connect to WSL Host").action(
-                    move || {
-                        workbench_command
-                            .send(LapceWorkbenchCommand::ConnectWslHost);
-                    },
-                ));
-            }
+
             menu
         })
         .style(move |s| {
@@ -524,7 +516,7 @@ pub fn window_controls_view(
     ))
     .style(move |s| {
         s.apply_if(
-            cfg!(target_os = "macos")
+            false
                 || !config.get_untracked().core.custom_titlebar
                 || (is_title && num_window_tabs.get() > 1),
             |s| s.hide(),

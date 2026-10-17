@@ -34,10 +34,8 @@ use crate::{
 
 const DEFAULT_KEYMAPS_COMMON: &str =
     include_str!("../../defaults/keymaps-common.toml");
-const DEFAULT_KEYMAPS_MACOS: &str =
-    include_str!("../../defaults/keymaps-macos.toml");
-const DEFAULT_KEYMAPS_NONMACOS: &str =
-    include_str!("../../defaults/keymaps-nonmacos.toml");
+const DEFAULT_KEYMAPS_LINUX: &str =
+    include_str!("../../defaults/keymaps-linux.toml");
 
 pub trait KeyPressFocus: std::fmt::Debug {
     fn get_mode(&self) -> Mode;
@@ -416,12 +414,6 @@ impl KeyPressData {
 
         let mut mods = keypress.mods;
 
-        #[cfg(target_os = "macos")]
-        {
-            mods.set(Modifiers::SHIFT, false);
-            mods.set(Modifiers::ALT, false);
-        }
-        #[cfg(not(target_os = "macos"))]
         {
             mods.set(Modifiers::SHIFT, false);
             mods.set(Modifiers::ALTGR, false);
@@ -577,11 +569,7 @@ impl KeyPressData {
             trace!(TraceLevel::ERROR, "Failed to load common defaults: {err}");
         }
 
-        let os_keymaps = if std::env::consts::OS == "macos" {
-            DEFAULT_KEYMAPS_MACOS
-        } else {
-            DEFAULT_KEYMAPS_NONMACOS
-        };
+        let os_keymaps = DEFAULT_KEYMAPS_LINUX;
 
         if let Err(err) = loader.load_from_str(os_keymaps, is_modal) {
             trace!(TraceLevel::ERROR, "Failed to load OS defaults: {err}");

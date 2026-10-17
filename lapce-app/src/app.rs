@@ -1,5 +1,3 @@
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 use std::{
     io::{BufReader, IsTerminal, Read, Write},
     ops::Range,
@@ -228,9 +226,7 @@ impl AppData {
             .unwrap_or_else(|| {
                 self.default_window_config().size(Size::new(800.0, 600.0))
             });
-        let config = if cfg!(target_os = "macos")
-            || self.config.get_untracked().core.custom_titlebar
-        {
+        let config = if self.config.get_untracked().core.custom_titlebar {
             config.show_titlebar(false)
         } else {
             config
@@ -328,19 +324,6 @@ impl AppData {
                 .unwrap_or_else(|_| (Size::new(800.0, 600.0), Point::new(0.0, 0.0)));
 
             for dir in dirs {
-                #[cfg(windows)]
-                let workspace_type = if !std::env::var("WSL_DISTRO_NAME")
-                    .unwrap_or_default()
-                    .is_empty()
-                    || !std::env::var("WSL_INTEROP").unwrap_or_default().is_empty()
-                {
-                    LapceWorkspaceType::RemoteWSL(crate::workspace::WslHost {
-                        host: String::new(),
-                    })
-                } else {
-                    LapceWorkspaceType::Local
-                };
-                #[cfg(not(windows))]
                 let workspace_type = LapceWorkspaceType::Local;
 
                 let info = WindowInfo {
@@ -363,9 +346,7 @@ impl AppData {
                     .default_window_config()
                     .size(info.size)
                     .position(info.pos);
-                let config = if cfg!(target_os = "macos")
-                    || self.config.get_untracked().core.custom_titlebar
-                {
+                let config = if self.config.get_untracked().core.custom_titlebar {
                     config.show_titlebar(false)
                 } else {
                     config
@@ -387,13 +368,12 @@ impl AppData {
                             .default_window_config()
                             .size(info.size)
                             .position(info.pos);
-                        let config = if cfg!(target_os = "macos")
-                            || self.config.get_untracked().core.custom_titlebar
-                        {
-                            config.show_titlebar(false)
-                        } else {
-                            config
-                        };
+                        let config =
+                            if self.config.get_untracked().core.custom_titlebar {
+                                config.show_titlebar(false)
+                            } else {
+                                config
+                            };
                         let app_data = self.clone();
                         app = app.window(
                             move |window_id| {
@@ -428,9 +408,7 @@ impl AppData {
                 .default_window_config()
                 .size(info.size)
                 .position(info.pos);
-            let config = if cfg!(target_os = "macos")
-                || self.config.get_untracked().core.custom_titlebar
-            {
+            let config = if self.config.get_untracked().core.custom_titlebar {
                 config.show_titlebar(false)
             } else {
                 config
@@ -599,11 +577,9 @@ impl AppData {
             .style(move |s| {
                 s.absolute()
                     .size_full()
-                    .apply_if(
-                        cfg!(target_os = "macos")
-                            || !config.get_untracked().core.custom_titlebar,
-                        |s| s.hide(),
-                    )
+                    .apply_if(!config.get_untracked().core.custom_titlebar, |s| {
+                        s.hide()
+                    })
                     .pointer_events_none()
             }),
         ))
@@ -2649,19 +2625,6 @@ fn palette_item(
                 .style(|s| s.align_items(Some(AlignItems::Center)).max_width_full()),
             )
         }
-        #[cfg(windows)]
-        PaletteItemContent::WslHost { .. } => {
-            let text = item.filter_text;
-            let indices = item.indices;
-            container(
-                focus_text(
-                    move || text.clone(),
-                    move || indices.clone(),
-                    move || config.get().color(LapceColor::EDITOR_FOCUS),
-                )
-                .style(|s| s.align_items(Some(AlignItems::Center)).max_width_full()),
-            )
-        }
     }
     .style(move |s| {
         s.width_full()
@@ -3442,8 +3405,6 @@ fn workspace_title(workspace: &LapceWorkspace) -> Option<String> {
     Some(match &workspace.kind {
         LapceWorkspaceType::Local => format!("{dir}"),
         LapceWorkspaceType::RemoteSSH(remote) => format!("{dir} [{remote}]"),
-        #[cfg(windows)]
-        LapceWorkspaceType::RemoteWSL(remote) => format!("{dir} [{remote}]"),
     })
 }
 
@@ -3460,16 +3421,14 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
     let window_command = window_data.common.window_command;
 
     let tab_width = create_memo(move |_| {
-        let window_control_width = if !cfg!(target_os = "macos")
-            && config.get_untracked().core.custom_titlebar
-        {
+        let window_control_width = if config.get_untracked().core.custom_titlebar {
             window_control_width.get()
         } else {
             0.0
         };
         let available_width = available_width.get()
             - add_icon_width.get()
-            - if cfg!(target_os = "macos") { 75.0 } else { 0.0 }
+            - { 0.0 }
             - window_control_width
             - 30.0;
         let tabs_len = tabs.with(|tabs| tabs.len());
@@ -3564,10 +3523,7 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
                             .items_center()
                             .border_right(1.0)
                             .border_color(config.color(LapceColor::LAPCE_BORDER))
-                            .apply_if(
-                                cfg!(target_os = "macos") && index.get() == 0,
-                                |s| s.border_left(1.0),
-                            )
+                            .apply_if(false, |s| s.border_left(1.0))
                     }),
                     container(empty().style(move |s| {
                         s.size_full()
@@ -3643,7 +3599,7 @@ fn workspace_tab_header(window_data: WindowData) -> impl View {
 
     stack((
         empty().style(move |s| {
-            let is_macos = cfg!(target_os = "macos");
+            let is_macos = false;
             s.min_width(75.0)
                 .width(75.0)
                 .apply_if(!is_macos, |s| s.hide())
@@ -3834,8 +3790,6 @@ pub fn launch() {
         let mut args = std::env::args().collect::<Vec<_>>();
         args.push("--wait".to_string());
         let mut cmd = std::process::Command::new(&args[0]);
-        #[cfg(target_os = "windows")]
-        cmd.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW);
 
         let stderr_file_path =
             Directory::logs_directory().unwrap().join("stderr.log");
@@ -3897,8 +3851,6 @@ pub fn launch() {
     let db = match LapceDb::new() {
         Ok(db) => Arc::new(db),
         Err(e) => {
-            #[cfg(windows)]
-            logging::error_modal("Error", &format!("Failed to create LapceDb: {e}"));
 
             trace!(TraceLevel::ERROR, "Failed to create LapceDb: {e}");
             std::process::exit(1);
@@ -4112,7 +4064,6 @@ pub fn load_shell_env() {
 
     use tracing::warn;
 
-    #[cfg(not(windows))]
     let shell = match std::env::var("SHELL") {
         Ok(s) => s,
         Err(error) => {
@@ -4125,22 +4076,9 @@ pub fn load_shell_env() {
         }
     };
 
-    #[cfg(windows)]
-    let shell = "powershell";
-
     let mut command = Command::new(shell);
 
-    #[cfg(not(windows))]
     command.args(["--login", "-c", "printenv"]);
-
-    #[cfg(windows)]
-    command.args([
-        "-Command",
-        "Get-ChildItem env: | ForEach-Object { \"{0}={1}\" -f $_.Name, $_.Value }",
-    ]);
-
-    #[cfg(windows)]
-    command.creation_flags(windows::Win32::System::Threading::CREATE_NO_WINDOW);
 
     let env = match command.output() {
         Ok(output) => String::from_utf8(output.stdout).unwrap_or_default(),
@@ -4270,13 +4208,7 @@ pub fn window_menu(
                 .entry(MenuItem::new("Quit Lapce").action(move || {
                     workbench_command.send(LapceWorkbenchCommand::Quit);
                 }));
-            if cfg!(target_os = "macos") {
-                menu = menu
-                    .separator()
-                    .entry(MenuItem::new("Hide Lapce"))
-                    .entry(MenuItem::new("Hide Others"))
-                    .entry(MenuItem::new("Show All"))
-            }
+            {}
             menu
         })
         .separator()

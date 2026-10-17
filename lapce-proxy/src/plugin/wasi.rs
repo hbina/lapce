@@ -438,7 +438,6 @@ pub fn start_volt(
         .as_ref()
         .ok_or_else(|| anyhow!("plugin meta doesn't have dir"))?;
 
-    #[cfg(target_os = "linux")]
     let volt_libc = {
         match std::process::Command::new("ldd").arg("--version").output() {
             Ok(cmd) => {
@@ -457,9 +456,6 @@ pub fn start_volt(
             _ => "glibc",
         }
     };
-
-    #[cfg(not(target_os = "linux"))]
-    let volt_libc = "";
 
     let stdin = Arc::new(RwLock::new(WasiPipe::new()));
     let stdout = Arc::new(RwLock::new(WasiPipe::new()));

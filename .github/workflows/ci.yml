@@ -31,7 +31,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -62,14 +62,6 @@ jobs:
             target/ci/lapce*
           retention-days: 1
 
-      - name: Build as portable
-        if: startsWith(matrix.os, 'windows')
-        run: cargo build --profile ci --frozen --features lapce-app/portable
-
-      - name: Free space on Windows
-        if: startsWith(matrix.os, 'windows')
-        run: cargo clean
-
       - name: Run doc tests
         run: cargo test --profile ci --doc --workspace
 
@@ -95,7 +87,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, windows-latest, macos-latest]
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd

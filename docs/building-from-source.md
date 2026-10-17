@@ -1,5 +1,7 @@
 ## Building from source
 
+This fork supports Linux only, including SSH workspaces on Linux hosts.
+
 It is easy to build Lapce from source on a GNU/Linux distribution. Cargo handles the build process, all you need to do, is ensure the correct dependencies are installed.
 
 1. Install the Rust compiler and Cargo using [`rustup.rs`](https://rustup.rs/). If you already have the toolchain, ensure you are using latest Rust version.

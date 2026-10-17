@@ -741,8 +741,12 @@ impl WindowTabData {
             OpenFolder => {
                 if !self.workspace.kind.is_remote() {
                     let window_command = self.common.window_common.window_command;
-                    let mut options = FileDialogOptions::new().title("Choose a folder").select_directories();
-                    options = if let Some(parent) = self.workspace.path.as_ref().and_then(|x| x.parent()) {
+                    let mut options = FileDialogOptions::new()
+                        .title("Choose a folder")
+                        .select_directories();
+                    options = if let Some(parent) =
+                        self.workspace.path.as_ref().and_then(|x| x.parent())
+                    {
                         options.force_starting_directory(parent)
                     } else {
                         options
@@ -797,7 +801,8 @@ impl WindowTabData {
                             })
                         }
                     });
-                } else { // TODO: Force only choosing files?
+                } else {
+                    // TODO: Force only choosing files?
                     self.palette.run(PaletteKind::FileChooser);
                 }
             }
@@ -1121,10 +1126,7 @@ impl WindowTabData {
             ConnectSshHost => {
                 self.palette.run(PaletteKind::SshHost);
             }
-            #[cfg(windows)]
-            ConnectWslHost => {
-                self.palette.run(PaletteKind::WslHost);
-            }
+
             DisconnectRemote => {
                 self.common.window_common.window_command.send(
                     WindowCommand::SetWorkspace {
@@ -1145,7 +1147,7 @@ impl WindowTabData {
             }
             Palette => {
                 self.palette.run(PaletteKind::File);
-            },
+            }
             PaletteSymbol => {
                 self.palette.run(PaletteKind::DocumentSymbol);
             }
@@ -1231,11 +1233,7 @@ impl WindowTabData {
             ZoomReset => {
                 self.common.window_common.window_scale.set(1.0);
 
-                LapceConfig::update_file(
-                    "ui",
-                    "scale",
-                    toml_edit::Value::from(1.0),
-                );
+                LapceConfig::update_file("ui", "scale", toml_edit::Value::from(1.0));
             }
 
             ToggleMaximizedPanel => {
@@ -1400,49 +1398,37 @@ impl WindowTabData {
                                     update_in_progress.set(false);
                                 },
                             );
-                            std::thread::Builder::new().name("RestartToUpdate".to_owned()).spawn(move || {
-                                let do_update = || -> anyhow::Result<()> {
-                                    let src =
-                                        crate::update::download_release(&release)?;
+                            std::thread::Builder::new()
+                                .name("RestartToUpdate".to_owned())
+                                .spawn(move || {
+                                    let do_update = || -> anyhow::Result<()> {
+                                        let src = crate::update::download_release(
+                                            &release,
+                                        )?;
 
-                                    let path =
-                                        crate::update::extract(&src, &process_path)?;
+                                        let path = crate::update::extract(
+                                            &src,
+                                            &process_path,
+                                        )?;
 
-                                    crate::update::restart(&path)?;
+                                        crate::update::restart(&path)?;
 
-                                    Ok(())
-                                };
+                                        Ok(())
+                                    };
 
-                                if let Err(err) = do_update() {
-                                    error!("Failed to update: {err}");
-                                }
+                                    if let Err(err) = do_update() {
+                                        error!("Failed to update: {err}");
+                                    }
 
-                                send(false);
-                            }).unwrap();
+                                    send(false);
+                                })
+                                .unwrap();
                         }
                     }
                 }
             }
 
             // ==== Movement ====
-            #[cfg(target_os = "macos")]
-            InstallToPATH => {
-                self.common.internal_command.send(
-                    InternalCommand::ExecuteProcess {
-                        program: String::from("osascript"),
-                        arguments: vec![String::from("-e"), format!(r#"do shell script "ln -sf '{}' /usr/local/bin/lapce" with administrator privileges"#, std::env::args().next().unwrap())],
-                    }
-                )
-            }
-            #[cfg(target_os = "macos")]
-            UninstallFromPATH => {
-                self.common.internal_command.send(
-                    InternalCommand::ExecuteProcess {
-                        program: String::from("osascript"),
-                        arguments: vec![String::from("-e"), String::from(r#"do shell script "rm /usr/local/bin/lapce" with administrator privileges"#)],
-                    }
-                )
-            }
             JumpLocationForward => {
                 self.main_split.jump_location_forward(false);
             }
@@ -1467,11 +1453,14 @@ impl WindowTabData {
                     self.main_split.active_editor.get_untracked()
                 {
                     self.show_panel(PanelKind::FileExplorer);
-                    self.panel
-                        .section_open(PanelSection::FileExplorer).update(|x| {
-                        *x = true;
-                    });
-                    if let DocContent::File {path, ..} = editor_data.doc().content.get_untracked() {
+                    self.panel.section_open(PanelSection::FileExplorer).update(
+                        |x| {
+                            *x = true;
+                        },
+                    );
+                    if let DocContent::File { path, .. } =
+                        editor_data.doc().content.get_untracked()
+                    {
                         self.file_explorer.reveal_in_file_tree(path);
                     }
                 }
@@ -1480,25 +1469,33 @@ impl WindowTabData {
                 if let Some(editor_data) =
                     self.main_split.active_editor.get_untracked()
                 {
-                    if let DocContent::File {path, ..} = editor_data.doc().content.get_untracked() {
-                        let offset = editor_data.cursor().with_untracked(|c| c.offset());
-                        let line = editor_data.doc()
+                    if let DocContent::File { path, .. } =
+                        editor_data.doc().content.get_untracked()
+                    {
+                        let offset =
+                            editor_data.cursor().with_untracked(|c| c.offset());
+                        let line = editor_data
+                            .doc()
                             .buffer
                             .with_untracked(|buffer| buffer.line_of_offset(offset));
                         self.common.proxy.git_get_remote_file_url(
                             path,
                             create_ext_action(self.scope, move |result| {
                                 if let Ok(ProxyResponse::GitGetRemoteFileUrl {
-                                              file_url
-                                          }) = result
+                                    file_url,
+                                }) = result
                                 {
-                                    if let Err(err) = open::that(format!("{}#L{}", file_url, line)) {
-                                        error!("Failed to open file in github: {}",  err);
+                                    if let Err(err) =
+                                        open::that(format!("{}#L{}", file_url, line))
+                                    {
+                                        error!(
+                                            "Failed to open file in github: {}",
+                                            err
+                                        );
                                     }
                                 }
                             }),
                         );
-
                     }
                 }
             }
@@ -1506,16 +1503,18 @@ impl WindowTabData {
                 if let Some(editor_data) =
                     self.main_split.active_editor.get_untracked()
                 {
-                    if let DocContent::File {path, ..} = editor_data.doc().content.get_untracked() {
+                    if let DocContent::File { path, .. } =
+                        editor_data.doc().content.get_untracked()
+                    {
                         let path = path.parent().unwrap_or(&path);
                         if !path.exists() {
                             return;
                         }
                         if let Err(err) = open::that(path) {
                             error!(
-                            "Failed to reveal file in system file explorer: {}",
-                            err
-                        );
+                                "Failed to reveal file in system file explorer: {}",
+                                err
+                            );
                         }
                     }
                 }
@@ -1548,13 +1547,11 @@ impl WindowTabData {
                     let name = editor_data.word_at_cursor();
                     if !name.is_empty() {
                         let mut args_str = name.split(" ");
-                        let program = args_str.next().map(|x| x.to_string()).unwrap();
-                        let args: Vec<String> = args_str.map(|x| x.to_string()).collect();
-                        let args = if args.is_empty() {
-                            None
-                        } else {
-                            Some(args)
-                        };
+                        let program =
+                            args_str.next().map(|x| x.to_string()).unwrap();
+                        let args: Vec<String> =
+                            args_str.map(|x| x.to_string()).collect();
+                        let args = if args.is_empty() { None } else { Some(args) };
 
                         let config = RunDebugConfig {
                             ty: None,
@@ -1569,9 +1566,12 @@ impl WindowTabData {
                             tracing_output: false,
                             config_source: ConfigSource::RunInTerminal,
                         };
-                        self.common
-                            .internal_command
-                            .send(InternalCommand::RunAndDebug { mode: RunDebugMode::Run, config });
+                        self.common.internal_command.send(
+                            InternalCommand::RunAndDebug {
+                                mode: RunDebugMode::Run,
+                                config,
+                            },
+                        );
                     }
                 }
             }
@@ -1592,13 +1592,15 @@ impl WindowTabData {
                     let internal_command = self.common.internal_command;
 
                     internal_command.send(InternalCommand::MakeConfirmed);
-                    internal_command.send(InternalCommand::GoToLocation { location: EditorLocation {
-                        path,
-                        position: Some(EditorPosition::Offset(offset)),
-                        scroll_offset: None,
-                        ignore_unconfirmed: false,
-                        same_editor_tab: false,
-                    } });
+                    internal_command.send(InternalCommand::GoToLocation {
+                        location: EditorLocation {
+                            path,
+                            position: Some(EditorPosition::Offset(offset)),
+                            scroll_offset: None,
+                            ignore_unconfirmed: false,
+                            same_editor_tab: false,
+                        },
+                    });
                 }
             }
             AddRunDebugConfig => {

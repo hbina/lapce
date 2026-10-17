@@ -203,14 +203,8 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Source Control: Open Remote File Url")]
     SourceControlOpenActiveFileRemoteUrl,
 
-    #[cfg(not(target_os = "macos"))]
     #[strum(serialize = "reveal_in_file_explorer")]
     #[strum(message = "Reveal in System File Explorer")]
-    RevealInFileExplorer,
-
-    #[cfg(target_os = "macos")]
-    #[strum(serialize = "reveal_in_file_explorer")]
-    #[strum(message = "Reveal in Finder")]
     RevealInFileExplorer,
 
     #[strum(serialize = "run_in_terminal")]
@@ -360,11 +354,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(serialize = "connect_ssh_host")]
     #[strum(message = "Connect to SSH Host")]
     ConnectSshHost,
-
-    #[cfg(windows)]
-    #[strum(serialize = "connect_wsl_host")]
-    #[strum(message = "Connect to WSL Host")]
-    ConnectWslHost,
 
     #[strum(serialize = "disconnect_remote")]
     #[strum(message = "Disconnect From Remote")]
@@ -562,16 +551,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Save All Files")]
     #[strum(serialize = "save_all")]
     SaveAll,
-
-    #[cfg(target_os = "macos")]
-    #[strum(message = "Install Lapce to PATH")]
-    #[strum(serialize = "install_to_path")]
-    InstallToPATH,
-
-    #[cfg(target_os = "macos")]
-    #[strum(message = "Uninstall Lapce from PATH")]
-    #[strum(serialize = "uninstall_from_path")]
-    UninstallFromPATH,
 
     #[strum(serialize = "jump_location_backward")]
     JumpLocationBackward,

@@ -13,7 +13,7 @@ The Lapce version you are using, which can be found in "About Lapce" at the top 
 
 ## System information
 
-the operating system used, including its version, e.g. Windows 10, Ubuntu 18.04
+the operating system used, including its version, e.g. Ubuntu 24.04
 
 ## Describe the bug
 A clear and concise description of what the bug is.

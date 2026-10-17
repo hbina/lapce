@@ -588,10 +588,9 @@ impl FileExplorerData {
         // TODO: there are situations where we can open the file explorer to remote files
         if !common.workspace.kind.is_remote() {
             let path = path_a.clone();
-            #[cfg(not(target_os = "macos"))]
+
             let title = "Reveal in system file explorer";
-            #[cfg(target_os = "macos")]
-            let title = "Reveal in Finder";
+
             menu = menu.entry(MenuItem::new(title).action(move || {
                 let path = path.parent().unwrap_or(&path);
                 if !path.exists() {

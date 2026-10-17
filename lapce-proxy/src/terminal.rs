@@ -24,14 +24,8 @@ use polling::PollMode;
 
 const READ_BUFFER_SIZE: usize = 0x10_0000;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
 const PTY_READ_WRITE_TOKEN: usize = 0;
-#[cfg(any(target_os = "linux", target_os = "macos"))]
-const PTY_CHILD_EVENT_TOKEN: usize = 1;
 
-#[cfg(target_os = "windows")]
-const PTY_READ_WRITE_TOKEN: usize = 2;
-#[cfg(target_os = "windows")]
 const PTY_CHILD_EVENT_TOKEN: usize = 1;
 
 pub struct TerminalSender {
@@ -79,9 +73,6 @@ impl Terminal {
         };
 
         setup_env();
-
-        #[cfg(target_os = "macos")]
-        set_locale_environment();
 
         let size = WindowSize {
             num_lines: height as u16,
@@ -162,7 +153,7 @@ impl Terminal {
                                 // just loop back round for the inevitable `Exited` event.
                                 // This sucks, but checking the process is either racy or
                                 // blocking.
-                                #[cfg(target_os = "linux")]
+
                                 if err.raw_os_error() == Some(libc::EIO) {
                                     continue;
                                 }
@@ -370,15 +361,5 @@ impl State {
     #[inline]
     fn set_current(&mut self, new: Option<Writing>) {
         self.writing = new;
-    }
-}
-
-#[cfg(target_os = "macos")]
-fn set_locale_environment() {
-    let locale = locale_config::Locale::global_default()
-        .to_string()
-        .replace('-', "_");
-    unsafe {
-        std::env::set_var("LC_ALL", locale + ".UTF-8");
     }
 }

@@ -23,8 +23,6 @@ use crate::{
 
 mod remote;
 mod ssh;
-#[cfg(windows)]
-mod wsl;
 
 pub struct Proxy {
     pub tx: Sender<CoreNotification>,
@@ -92,18 +90,6 @@ pub fn new_proxy(
                             error!("Failed to start SSH remote: {e}");
                         }
                     }
-                    #[cfg(windows)]
-                    LapceWorkspaceType::RemoteWSL(remote) => {
-                        if let Err(e) = start_remote(
-                            wsl::WslRemote {
-                                wsl: remote.clone(),
-                            },
-                            core_rpc.clone(),
-                            proxy_rpc.clone(),
-                        ) {
-                            error!("Failed to start SSH remote: {e}");
-                        }
-                    }
                 }
                 core_rpc.notification(CoreNotification::ProxyStatus {
                     status: ProxyStatus::Disconnected,
@@ -163,9 +149,5 @@ impl CoreHandler for Proxy {
 pub fn new_command(program: &str) -> Command {
     #[allow(unused_mut)]
     let mut cmd = Command::new(program);
-    #[cfg(target_os = "windows")]
-    use std::os::windows::process::CommandExt;
-    #[cfg(target_os = "windows")]
-    cmd.creation_flags(0x08000000);
     cmd
 }

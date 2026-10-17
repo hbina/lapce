@@ -1,5 +1,3 @@
-#[cfg(target_os = "windows")]
-use std::os::windows::process::CommandExt;
 use std::{
     io::{BufRead, BufReader, BufWriter, Write},
     path::{Path, PathBuf},
@@ -187,7 +185,7 @@ impl LspClient {
         let server = match server_uri.scheme() {
             "file" => {
                 let path = server_uri.to_file_path().map_err(|_| anyhow!(""))?;
-                #[cfg(unix)]
+
                 if let Err(err) = std::process::Command::new("chmod")
                     .arg("+x")
                     .arg(&path)
@@ -449,8 +447,6 @@ impl LspClient {
 
         process.args(args);
 
-        #[cfg(target_os = "windows")]
-        let process = process.creation_flags(0x08000000);
         let child = process
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())

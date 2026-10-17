@@ -95,47 +95,12 @@ pub(super) fn panic_hook() {
                     backtrace,
                 );
             }
-        }
+        };
 
-        #[cfg(windows)]
-        error_modal("Error", &info.to_string());
-
-        #[cfg(unix)]
         error_notification("Error", &info.to_string());
     }))
 }
 
-#[cfg(windows)]
-pub(super) fn error_modal(title: &str, msg: &str) -> i32 {
-    use std::{ffi::OsStr, iter::once, mem, os::windows::prelude::OsStrExt};
-
-    use windows::Win32::UI::WindowsAndMessaging::{
-        MB_ICONERROR, MB_SYSTEMMODAL, MessageBoxW,
-    };
-
-    let result: i32;
-
-    let title = OsStr::new(title)
-        .encode_wide()
-        .chain(once(0u16))
-        .collect::<Vec<u16>>();
-    let msg = OsStr::new(msg)
-        .encode_wide()
-        .chain(once(0u16))
-        .collect::<Vec<u16>>();
-    unsafe {
-        result = MessageBoxW(
-            mem::zeroed(),
-            msg.as_ptr(),
-            title.as_ptr(),
-            MB_ICONERROR | MB_SYSTEMMODAL,
-        );
-    }
-
-    result
-}
-
-#[cfg(unix)]
 pub fn error_notification(title: &str, msg: &str) {
     let res = std::process::Command::new("notify-send")
         .args([

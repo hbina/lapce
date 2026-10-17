@@ -45,6 +45,3 @@ pub mod web_link;
 pub mod window;
 pub mod window_tab;
 pub mod workspace;
-
-#[cfg(windows)]
-extern crate windows_sys as windows;
