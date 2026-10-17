@@ -9,6 +9,7 @@ on:
       - Cargo.lock
       - lapce-**
       - .github/workflows/ci.yml
+      - scripts/**
   workflow_dispatch:
 
 name: CI
@@ -24,22 +25,25 @@ env:
 permissions: {}
 
 jobs:
+  architecture:
+    name: Crate boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      - name: Check architecture
+        run: python3 scripts/check-architecture.py
+
   build:
-    name: Rust on ${{ matrix.os }}
+    name: Rust on Linux
     if: github.event.pull_request.draft == false
-    needs: [fmt, clippy]
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    needs: [fmt, clippy, architecture]
+    runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
       - name: Install dependencies on Ubuntu
-        if: startsWith(matrix.os, 'ubuntu')
         run: sudo make ubuntu-deps
 
       - name: Update toolchain
@@ -55,9 +59,36 @@ jobs:
       - name: Build
         run: cargo build --profile ci --frozen
 
+      - name: Validate live Rust language server
+        shell: bash
+        env:
+          LAPCE_TEST_PROXY: ${{ github.workspace }}/target/ci/lapce-proxy
+        run: |
+          rustup component add rust-analyzer
+          LAPCE_TEST_LSP="$(rustup which rust-analyzer)" cargo test --profile ci --frozen -p lapce-engine --test live_lsp -- --include-ignored
+
+      - name: Check resolved frontend dependencies
+        run: python3 scripts/check-architecture.py --resolved
+
+      - name: Test separate backend process
+        shell: bash
+        env:
+          LAPCE_TEST_PROXY: ${{ github.workspace }}/target/ci/lapce-proxy
+        run: |
+          cargo check --profile ci --frozen -p lapce-app --no-default-features
+          cargo test --profile ci --frozen -p lapce-rpc --lib
+          cargo test --profile ci --frozen -p lapce-client --no-default-features --lib --test leases
+          cargo test --profile ci --frozen -p lapce-client --no-default-features --test process -- --include-ignored
+          cargo test --profile ci --frozen -p lapce-engine --test process_reconnect -- --include-ignored
+
+      - name: Test shared frontend processes over Unix sockets
+        run: |
+          cargo build --profile ci --frozen -p lapce-client --example shared_host -p lapce-engine --example terminal
+          python3 scripts/test-shared-frontends.py
+
       - uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f
         with:
-          name: lapce-${{ matrix.os }}
+          name: lapce-linux
           path: |
             target/ci/lapce*
           retention-days: 1
@@ -83,12 +114,8 @@ jobs:
         uses: crate-ci/typos@02ea592e44b3a53c302f697cddca7641cd051c3d
 
   clippy:
-    name: Clippy on ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+    name: Clippy on Linux
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
 
@@ -98,7 +125,6 @@ jobs:
           rustup component add clippy
 
       - name: Install dependencies on Ubuntu
-        if: startsWith(matrix.os, 'ubuntu')
         run: sudo make ubuntu-deps
 
       - name: Cache Rust dependencies
