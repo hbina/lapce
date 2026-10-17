@@ -5,9 +5,9 @@
   </a>
 </h1>
 
-This fork supports Linux only. Windows, macOS and WSL are not supported.
+This fork is a **Linux-only, read-only code browser**. Windows, macOS, and WSL are not supported. SSH workspaces require a Linux host.
 
-<h4 align="center">Lightning-fast And Powerful Code Editor</h4>
+<h4 align="center">Read-only code navigation for Linux</h4>
 
 <div align="center">
   <a href="https://github.com/lapce/lapce/actions/workflows/ci.yml" target="_blank">
@@ -29,15 +29,18 @@ Lapce (IPA: /læps/) is written in pure Rust, with a UI in [Floem](https://githu
 
 ## Features
 
-* Built-in LSP ([Language Server Protocol](https://microsoft.github.io/language-server-protocol/)) support to give you intelligent code features such as: completion, diagnostics and code actions
-* Modal editing support as first class citizen (Vim-like, and toggleable)
-* Built-in remote development support inspired by [VSCode Remote Development](https://code.visualstudio.com/docs/remote/remote-overview). Enjoy the benefits of a "local" experience, and seamlessly gain the full power of a remote system. We also have [Lapdev](https://lap.dev/) which can help manage your remote dev environments. 
-* Plugins can be written in programming languages that can compile to the [WASI](https://wasi.dev/) format (C, Rust, [AssemblyScript](https://www.assemblyscript.org/))
-* Built-in terminal, so you can execute commands in your workspace, without leaving Lapce.
+* Always-read-only source browsing with navigation, selection, copying and search.
+* Language-server definitions, symbols, references, hover and diagnostics.
+* Read-only repository diffs and automatic refresh after external file changes.
+* Linux SSH workspaces and independent frontends sharing a backend.
+* Vim-style navigation and an optional terminal for workspace commands.
+
+Editing, saving, workspace mutations and debugger execution are removed from
+the code browser. Search and command inputs remain editable.
 
 ## Installation
 
-Build this Linux fork from source; upstream release binaries do not contain these changes.
+This fork targets Linux. Build it from this checkout; upstream release binaries do not contain these changes.
 If you'd like to compile from source, you can find the [guide](docs/building-from-source.md).
 
 ## Contributing
