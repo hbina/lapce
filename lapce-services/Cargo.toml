@@ -1,0 +1,22 @@
+[package]
+name = "lapce-services"
+description = "Shared host services for Lapce clients and the workspace backend"
+version = { workspace = true }
+edition = { workspace = true }
+license = { workspace = true }
+rust-version = { workspace = true }
+
+[dependencies]
+anyhow = { workspace = true }
+flate2 = { workspace = true }
+interprocess = { workspace = true }
+lapce-core = { workspace = true }
+lapce-rpc = { workspace = true }
+reqwest = { workspace = true }
+tar = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+zstd = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

@@ -3153,6 +3153,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "lapce-services"
+version = "0.4.6"
+dependencies = [
+ "anyhow",
+ "flate2",
+ "interprocess",
+ "lapce-core",
+ "lapce-rpc",
+ "reqwest",
+ "tar",
+ "tempfile",
+ "toml 0.5.9",
+ "tracing 0.2.0",
+ "zstd",
+]
+
+[[package]]
 name = "lapce-xi-rope"
 version = "0.3.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
