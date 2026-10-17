@@ -70,6 +70,13 @@ jobs:
       - name: Check resolved frontend dependencies
         run: python3 scripts/check-architecture.py --resolved
 
+      - name: Build and test iced frontend
+        env:
+          LAPCE_TEST_PROXY: ${{ github.workspace }}/target/ci/lapce-proxy
+        run: |
+          cargo build --profile ci --frozen -p lapce-iced
+          LAPCE_TEST_LSP="$(rustup which rust-analyzer)" cargo test --profile ci --frozen -p lapce-iced -- --include-ignored
+
       - name: Test separate backend process
         shell: bash
         env:

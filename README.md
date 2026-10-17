@@ -43,6 +43,11 @@ the code browser. Search and command inputs remain editable.
 This fork targets Linux. Build it from this checkout; upstream release binaries do not contain these changes.
 If you'd like to compile from source, you can find the [guide](docs/building-from-source.md).
 
+An additional [iced frontend](lapce-iced/README.md) exercises the shared backend
+and workspace engine with another UI library. Build it with
+`cargo build --profile ci -p lapce-iced -p lapce-proxy`, then run
+`target/ci/lapce-iced /path/to/workspace`.
+
 ## Contributing
 
 Guidelines for contributing to Lapce can be found in [`CONTRIBUTING.md`](CONTRIBUTING.md).

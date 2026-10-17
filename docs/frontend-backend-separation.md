@@ -19,6 +19,17 @@ and session API without importing Floem or copying orchestration from the deskto
 Shared-host notification routing, terminal ownership, cancellation and backend
 restart also need consolidation before claiming complete parity across frontends.
 
+`lapce-iced` now provides an additional Linux GUI adapter using iced rather than
+Floem. It calls `WorkspaceSession` for directory browsing, document loading,
+workspace search, navigation and backend events. A worker thread schedules these
+operations and sends presentation snapshots to iced; document ownership and
+synchronization remain in the engine. It supports a separate proxy process or
+an existing shared-host socket. Architecture checks reject Floem/desktop imports
+and backend embedding in its resolved dependencies. See its
+[run instructions and limitations](../lapce-iced/README.md). This is concrete
+evidence of another GUI library consuming shared behavior, while the desktop's
+separate orchestration and full frontend parity remain unfinished.
+
 The remaining desktop and engine debugger controllers have now been removed:
 Run/Debug palette and workbench commands, titlebar launcher, task configuration
 loading, terminal prelaunch/DAP state, breakpoint persistence and editor break-line
