@@ -14,9 +14,11 @@ use lapce_rpc::{
     proxy::{ProxyRpcHandler, ProxyStatus},
 };
 
+pub mod leases;
 pub mod managed;
 pub mod process;
 pub mod remote;
+pub mod shared;
 
 pub mod socket;
 pub mod ssh;
