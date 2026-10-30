@@ -37,13 +37,13 @@ floem-editor-core = { workspace = true }
 
 # proxy specific dependencies
 
-dyn-clone    = "1.0.16"
-jsonrpc-lite = "0.6.0"
-polling      = "3.5.0"
+dyn-clone    = "1.0.20"
+jsonrpc-lite = "0.6.1"
+polling      = "3.11.0"
 libc         = "0.2"
 
 # deleting files
-trash = "3.0.6"
+trash = "3.3.1"
 
 # search
 ignore        = "0.4"
