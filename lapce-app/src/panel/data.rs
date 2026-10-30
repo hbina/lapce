@@ -20,6 +20,30 @@ use crate::{
 
 pub type PanelOrder = im::HashMap<PanelPosition, im::Vector<PanelKind>>;
 
+pub(crate) fn deserialize_panel_order<'de, D>(
+    deserializer: D,
+) -> Result<PanelOrder, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let stored =
+        im::HashMap::<PanelPosition, Vec<String>>::deserialize(deserializer)?;
+    stored
+        .into_iter()
+        .map(|(position, panels)| {
+            let panels = panels
+                .into_iter()
+                .filter(|name| name != "Plugin")
+                .map(|name| {
+                    serde_json::from_value(serde_json::Value::String(name))
+                        .map_err(serde::de::Error::custom)
+                })
+                .collect::<Result<im::Vector<PanelKind>, D::Error>>()?;
+            Ok((position, panels))
+        })
+        .collect()
+}
+
 fn browser_panel_order(panels: PanelOrder) -> PanelOrder {
     // Keep the legacy enum solely to deserialize older saved layouts.
     panels
@@ -40,11 +64,7 @@ pub fn default_panel_order() -> PanelOrder {
     let mut order = PanelOrder::new();
     order.insert(
         PanelPosition::LeftTop,
-        im::vector![
-            PanelKind::FileExplorer,
-            PanelKind::Plugin,
-            PanelKind::SourceControl,
-        ],
+        im::vector![PanelKind::FileExplorer, PanelKind::SourceControl,],
     );
     order.insert(
         PanelPosition::BottomLeft,
@@ -92,6 +112,7 @@ pub struct PanelSize {
 
 #[derive(Clone, Serialize, Deserialize)]
 pub struct PanelInfo {
+    #[serde(deserialize_with = "deserialize_panel_order")]
     pub panels: PanelOrder,
     pub styles: im::HashMap<PanelPosition, PanelStyle>,
     pub size: PanelSize,

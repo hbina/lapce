@@ -1,5 +1,4 @@
 use std::{
-    collections::HashSet,
     env,
     path::{Path, PathBuf},
     rc::Rc,
@@ -26,7 +25,6 @@ use floem::{
     text::{Attrs, AttrsList, FamilyOwned, LineHeightValue, TextLayout},
     views::editor::core::buffer::rope_text::RopeText,
 };
-use im::HashMap;
 use indexmap::IndexMap;
 use lapce_core::{
     command::FocusCommand, cursor::CursorAffinity, directory::Directory, meta,
@@ -75,7 +73,6 @@ use crate::{
         kind::PanelKind,
         position::PanelContainerPosition,
     },
-    plugin::PluginData,
     proxy::{ProxyData, new_proxy},
     source_control::SourceControlData,
     terminal::{
@@ -165,7 +162,6 @@ pub struct WindowTabData {
     pub file_explorer: FileExplorerData,
     pub panel: PanelData,
     pub terminal: TerminalPanelData,
-    pub plugin: PluginData,
     pub source_control: SourceControlData,
     pub global_search: GlobalSearchData,
     pub call_hierarchy_data: CallHierarchyData,
@@ -280,13 +276,6 @@ impl WindowTabData {
         let cx = cx.create_child();
         let db: Arc<LapceDb> = use_context().unwrap();
 
-        let disabled_volts = db.get_disabled_volts().unwrap_or_default();
-        let workspace_disabled_volts = db
-            .get_workspace_disabled_volts(&workspace)
-            .unwrap_or_default();
-        let mut all_disabled_volts = disabled_volts.clone();
-        all_disabled_volts.extend(workspace_disabled_volts.clone());
-
         let workspace_info = if workspace.path.is_some() {
             db.get_workspace_info(&workspace).ok()
         } else {
@@ -297,11 +286,7 @@ impl WindowTabData {
             info
         };
 
-        let config = LapceConfig::load(
-            &workspace,
-            &all_disabled_volts,
-            &window_common.extra_plugin_paths,
-        );
+        let config = LapceConfig::load(&workspace);
         let lapce_command = Listener::new_empty(cx);
         let workbench_command = Listener::new_empty(cx);
         let internal_command = Listener::new_empty(cx);
@@ -324,9 +309,7 @@ impl WindowTabData {
             workspace.clone(),
             &config.core.backend_executable,
             &config.core.backend_socket,
-            all_disabled_volts,
-            window_common.extra_plugin_paths.as_ref().clone(),
-            config.plugins.clone(),
+            config.language_servers.clone(),
             term_tx.clone(),
         );
         let (config, set_config) = cx.create_signal(Arc::new(config));
@@ -481,15 +464,6 @@ impl WindowTabData {
         );
         let global_search = GlobalSearchData::new(cx, main_split.clone());
 
-        let plugin = PluginData::new(
-            cx,
-            HashSet::from_iter(disabled_volts),
-            HashSet::from_iter(workspace_disabled_volts),
-            main_split.editors,
-            common.clone(),
-            proxy.core_rpc.clone(),
-        );
-
         {
             let notification = create_signal_from_channel(term_notification_rx);
             let terminal = terminal.clone();
@@ -522,7 +496,6 @@ impl WindowTabData {
             panel,
             file_explorer,
             source_control,
-            plugin,
             global_search,
             call_hierarchy_data: CallHierarchyData {
                 root: cx.create_rw_signal(None),
@@ -591,63 +564,12 @@ impl WindowTabData {
     }
 
     pub fn reload_config(&self) {
-        let db: Arc<LapceDb> = use_context().unwrap();
+        let config = LapceConfig::load(&self.workspace);
+        self.common
+            .keypress
+            .update(|keypress| keypress.update_keymaps(&config));
 
-        let disabled_volts = db.get_disabled_volts().unwrap_or_default();
-        let workspace_disabled_volts = db
-            .get_workspace_disabled_volts(&self.workspace)
-            .unwrap_or_default();
-        let mut all_disabled_volts = disabled_volts;
-        all_disabled_volts.extend(workspace_disabled_volts);
-
-        let config = LapceConfig::load(
-            &self.workspace,
-            &all_disabled_volts,
-            &self.common.window_common.extra_plugin_paths,
-        );
-        self.common.keypress.update(|keypress| {
-            keypress.update_keymaps(&config);
-        });
-
-        let mut change_plugins = Vec::new();
-        for (key, configs) in self.common.config.get_untracked().plugins.iter() {
-            if config
-                .plugins
-                .get(key)
-                .map(|x| x != configs)
-                .unwrap_or_default()
-            {
-                change_plugins.push(key.clone());
-            }
-        }
-        self.set_config.set(Arc::new(config.clone()));
-        if !change_plugins.is_empty() {
-            self.common
-                .proxy
-                .update_plugin_configs(config.plugins.clone());
-            if config.core.auto_reload_plugin {
-                let mut plugin_metas: HashMap<
-                    String,
-                    lapce_rpc::plugin::VoltMetadata,
-                > = self
-                    .plugin
-                    .installed
-                    .get_untracked()
-                    .values()
-                    .map(|x| {
-                        let meta = x.meta.get_untracked();
-                        (meta.name.clone(), meta)
-                    })
-                    .collect();
-                for name in change_plugins {
-                    if let Some(meta) = plugin_metas.remove(&name) {
-                        self.common.proxy.reload_volt(meta);
-                    } else {
-                        tracing::error!("not found volt metadata of {}", name);
-                    }
-                }
-            }
-        }
+        self.set_config.set(Arc::new(config));
     }
 
     pub fn run_lapce_command(&self, cmd: LapceCommand) {
@@ -854,11 +776,7 @@ impl WindowTabData {
                     open_uri(&dir);
                 }
             }
-            OpenPluginsDirectory => {
-                if let Some(dir) = Directory::plugins_directory() {
-                    open_uri(&dir);
-                }
-            }
+
             OpenGrammarsDirectory => {
                 if let Some(dir) = Directory::grammars_directory() {
                     open_uri(&dir);
@@ -1191,9 +1109,7 @@ impl WindowTabData {
             ToggleSourceControlFocus => {
                 self.toggle_panel_focus(PanelKind::SourceControl);
             }
-            TogglePluginFocus => {
-                self.toggle_panel_focus(PanelKind::Plugin);
-            }
+
             ToggleFileExplorerFocus => {
                 self.toggle_panel_focus(PanelKind::FileExplorer);
             }
@@ -1209,9 +1125,7 @@ impl WindowTabData {
             ToggleSourceControlVisual => {
                 self.toggle_panel_visual(PanelKind::SourceControl);
             }
-            TogglePluginVisual => {
-                self.toggle_panel_visual(PanelKind::Plugin);
-            }
+
             ToggleFileExplorerVisual => {
                 self.toggle_panel_visual(PanelKind::FileExplorer);
             }
@@ -1678,9 +1592,6 @@ impl WindowTabData {
                 self.common.proxy_status.set(Some(status));
             }
 
-            InternalCommand::OpenVoltView { volt_id } => {
-                self.main_split.open_volt_view(volt_id);
-            }
             InternalCommand::ResetBlinkCursor => {
                 // All the editors share the blinking information and logic, so we can just reset
                 // one of them.
@@ -1896,12 +1807,7 @@ impl WindowTabData {
             CoreNotification::OpenFileChanged { path, content } => {
                 self.main_split.open_file_changed(path, content);
             }
-            CoreNotification::VoltInstalled { volt, icon } => {
-                self.plugin.volt_installed(volt, icon);
-            }
-            CoreNotification::VoltRemoved { volt, .. } => {
-                self.plugin.volt_removed(volt);
-            }
+
             CoreNotification::WorkDoneProgress { progress } => {
                 self.update_progress(progress);
             }
@@ -1981,9 +1887,7 @@ impl WindowTabData {
             Focus::Panel(PanelKind::Search) => {
                 Some(keypress.key_down(event, &self.global_search))
             }
-            Focus::Panel(PanelKind::Plugin) => {
-                Some(keypress.key_down(event, &self.plugin))
-            }
+
             Focus::Panel(PanelKind::SourceControl) => {
                 Some(keypress.key_down(event, &self.source_control))
             }
@@ -2145,8 +2049,7 @@ impl WindowTabData {
     /// Toggle a specific kind of panel.
     fn toggle_panel_focus(&self, kind: PanelKind) {
         let should_hide = match kind {
-            PanelKind::Plugin
-            | PanelKind::Problem
+            PanelKind::Problem
             | PanelKind::Debug
             | PanelKind::CallHierarchy
             | PanelKind::DocumentSymbol

@@ -21,7 +21,7 @@ use crate::{
         self, DapId, RunDebugConfig, Scope, StackFrame, Stopped, ThreadId, Variable,
     },
     file::PathObject,
-    plugin::{PluginId, VoltInfo, VoltMetadata},
+    plugin::PluginId,
     proxy::ProxyStatus,
     source_control::DiffInfo,
     terminal::TermId,
@@ -89,22 +89,7 @@ pub enum CoreNotification {
     HomeDir {
         path: PathBuf,
     },
-    VoltInstalled {
-        volt: VoltMetadata,
-        icon: Option<Vec<u8>>,
-    },
-    VoltInstalling {
-        volt: VoltInfo,
-        error: String,
-    },
-    VoltRemoving {
-        volt: VoltMetadata,
-        error: String,
-    },
-    VoltRemoved {
-        volt: VoltInfo,
-        only_installing: bool,
-    },
+
     DiffInfo {
         diff: DiffInfo,
     },
@@ -287,25 +272,6 @@ impl CoreRpcHandler {
             request_id,
             resp,
             plugin_id,
-        });
-    }
-
-    pub fn volt_installed(&self, volt: VoltMetadata, icon: Option<Vec<u8>>) {
-        self.notification(CoreNotification::VoltInstalled { volt, icon });
-    }
-
-    pub fn volt_installing(&self, volt: VoltInfo, error: String) {
-        self.notification(CoreNotification::VoltInstalling { volt, error });
-    }
-
-    pub fn volt_removing(&self, volt: VoltMetadata, error: String) {
-        self.notification(CoreNotification::VoltRemoving { volt, error });
-    }
-
-    pub fn volt_removed(&self, volt: VoltInfo, only_installing: bool) {
-        self.notification(CoreNotification::VoltRemoved {
-            volt,
-            only_installing,
         });
     }
 

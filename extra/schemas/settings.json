@@ -23,6 +23,9 @@
                 },
                 "icon-theme": {
                     "$schema": "file://./icon-theme.json"
+                },
+                "lapce-native-lsp": {
+                    "$ref": "#/definitions/NativeLanguageServers"
                 }
             },
             "required": [],
@@ -356,6 +359,42 @@
             },
             "required": [],
             "title": "UI"
+        },
+        "NativeLanguageServers": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "servers": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "required": [
+                            "language",
+                            "executable"
+                        ],
+                        "properties": {
+                            "language": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "executable": {
+                                "type": "string",
+                                "description": "Absolute path to an installed executable on the backend host."
+                            },
+                            "arguments": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string"
+                                }
+                            },
+                            "options": {
+                                "description": "Initialization options passed to the language server."
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }

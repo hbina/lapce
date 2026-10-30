@@ -3,6 +3,7 @@
 import argparse
 import json
 import subprocess
+import tomllib
 from pathlib import Path
 
 parser = argparse.ArgumentParser(description=__doc__)
@@ -15,6 +16,13 @@ metadata = json.loads(subprocess.check_output(
     cwd=root, text=True,
 ))
 packages = {package["name"]: package for package in metadata["packages"]}
+
+# No package in the lockfile may bring back the removed extension runtime.
+lockfile = tomllib.loads((root / "Cargo.lock").read_text())
+runtime_packages = {package["name"] for package in lockfile["package"]
+                    if package["name"].startswith(("wasmtime-", "cranelift-", "wasi-experimental-http"))
+                    or package["name"] in {"wasmtime", "wasi-common", "psp-types"}}
+assert not runtime_packages, f"Removed extension runtime dependencies: {sorted(runtime_packages)}"
 
 root_binaries = {target["name"] for target in packages["lapce"]["targets"]
                  if "bin" in target["kind"]}

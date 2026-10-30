@@ -6,7 +6,6 @@ use std::{
         Arc,
         atomic::{AtomicU64, Ordering},
     },
-    thread,
 };
 
 use anyhow::{Result, anyhow};
@@ -18,7 +17,7 @@ use lapce_core::{encoding::offset_utf16_to_utf8, rope_text_pos::RopeTextPosition
 use lapce_rpc::{
     RpcError,
     core::{CoreRpcHandler, ServerStatusParams},
-    plugin::{PluginId, VoltID},
+    plugin::PluginId,
     style::{LineStyle, Style},
 };
 use lapce_xi_rope::{Rope, RopeDelta};
@@ -44,25 +43,16 @@ use lsp_types::{
         DocumentHighlightRequest, DocumentSymbolRequest, FoldingRangeRequest,
         Formatting, GotoDefinition, GotoImplementation, GotoTypeDefinition,
         HoverRequest, Initialize, InlayHintRequest, InlineCompletionRequest,
-        PrepareRenameRequest, References, RegisterCapability, Rename,
+        PrepareRenameRequest, References, RegisterCapability, Rename, Request,
         ResolveCompletionItem, SelectionRangeRequest, SemanticTokensFullRequest,
         SignatureHelpRequest, WorkDoneProgressCreate, WorkspaceSymbolRequest,
     },
 };
 use parking_lot::Mutex;
-use psp_types::{
-    ExecuteProcess, ExecuteProcessParams, ExecuteProcessResult,
-    RegisterDebuggerType, Request, SendLspNotification, SendLspNotificationParams,
-    SendLspRequest, SendLspRequestParams, SendLspRequestResult, StartLspServer,
-    StartLspServerParams, StartLspServerResult,
-};
 use serde::Serialize;
 use serde_json::Value;
 
-use super::{
-    PluginCatalogRpcHandler,
-    lsp::{DocumentFilter, LspClient},
-};
+use super::{PluginCatalogRpcHandler, lsp::DocumentFilter};
 
 pub enum ResponseHandler<Resp, Error> {
     Chan(Sender<Result<Resp, Error>>),
@@ -109,8 +99,6 @@ pub enum PluginHandlerNotification {
     Initialize,
     InitializeResult(InitializeResult),
     Shutdown,
-
-    SpawnedPluginLoaded { plugin_id: PluginId },
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -170,9 +158,7 @@ pub enum PluginServerRpc {
 
 #[derive(Clone)]
 pub struct PluginServerRpcHandler {
-    pub spawned_by: Option<PluginId>,
     pub plugin_id: PluginId,
-    pub volt_id: VoltID,
     rpc_tx: Sender<PluginServerRpc>,
     rpc_rx: Receiver<PluginServerRpc>,
     io_tx: Sender<JsonRpc>,
@@ -269,18 +255,11 @@ pub trait PluginServerHandler {
 }
 
 impl PluginServerRpcHandler {
-    pub fn new(
-        volt_id: VoltID,
-        spawned_by: Option<PluginId>,
-        plugin_id: Option<PluginId>,
-        io_tx: Sender<JsonRpc>,
-    ) -> Self {
+    pub fn new(io_tx: Sender<JsonRpc>) -> Self {
         let (rpc_tx, rpc_rx) = crossbeam_channel::unbounded();
 
         let rpc = Self {
-            spawned_by,
-            volt_id,
-            plugin_id: plugin_id.unwrap_or_else(PluginId::next),
+            plugin_id: PluginId::next(),
             rpc_tx,
             rpc_rx,
             io_tx,
@@ -620,29 +599,19 @@ struct ServerRegistrations {
 }
 
 pub struct PluginHostHandler {
-    volt_id: VoltID,
-    volt_display_name: String,
-    pwd: Option<PathBuf>,
-    pub(crate) workspace: Option<PathBuf>,
+    server_name: String,
     document_selector: Vec<DocumentFilter>,
     core_rpc: CoreRpcHandler,
     catalog_rpc: PluginCatalogRpcHandler,
     pub server_rpc: PluginServerRpcHandler,
     pub server_capabilities: ServerCapabilities,
     server_registrations: ServerRegistrations,
-
-    /// Language servers that this plugin has spawned.
-    /// Note that these plugin ids could be 'dead' if the LSP died/exited.
-    spawned_lsp: HashMap<PluginId, SpawnedLspInfo>,
 }
 
 impl PluginHostHandler {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        workspace: Option<PathBuf>,
-        pwd: Option<PathBuf>,
-        volt_id: VoltID,
-        volt_display_name: String,
+        server_name: String,
         document_selector: DocumentSelector,
         core_rpc: CoreRpcHandler,
         server_rpc: PluginServerRpcHandler,
@@ -653,17 +622,13 @@ impl PluginHostHandler {
             .map(DocumentFilter::from_lsp_filter_loose)
             .collect();
         Self {
-            pwd,
-            workspace,
-            volt_id,
-            volt_display_name,
+            server_name,
             document_selector,
             core_rpc,
             catalog_rpc,
             server_rpc,
             server_capabilities: ServerCapabilities::default(),
             server_registrations: ServerRegistrations::default(),
-            spawned_lsp: HashMap::new(),
         }
     }
 
@@ -977,115 +942,7 @@ impl PluginHostHandler {
                 self.register_capabilities(params.registrations);
                 resp.send_null();
             }
-            ExecuteProcess::METHOD => {
-                let params: ExecuteProcessParams =
-                    serde_json::from_value(serde_json::to_value(params)?)?;
-                let output = std::process::Command::new(params.program)
-                    .args(params.args)
-                    .output()?;
-
-                resp.send(ExecuteProcessResult {
-                    success: output.status.success(),
-                    stdout: Some(output.stdout),
-                    stderr: Some(output.stderr),
-                });
-            }
-            // Older plugins may register a debugger alongside their language
-            // server. Acknowledge the unused registration without storing or
-            // launching a debugger; language navigation continues to work.
-            RegisterDebuggerType::METHOD => resp.send_null(),
-            StartLspServer::METHOD => {
-                let params: StartLspServerParams =
-                    serde_json::from_value(serde_json::to_value(params)?)?;
-                let workspace = self.workspace.clone();
-                let pwd = self.pwd.clone();
-                let catalog_rpc = self.catalog_rpc.clone();
-                let volt_id = self.volt_id.clone();
-                let volt_display_name = self.volt_display_name.clone();
-
-                let spawned_by = self.server_rpc.plugin_id;
-                let plugin_id = PluginId::next();
-                self.spawned_lsp
-                    .insert(plugin_id, SpawnedLspInfo { resp: Some(resp) });
-                thread::spawn(move || {
-                    if let Err(err) = LspClient::start(
-                        catalog_rpc,
-                        params.document_selector,
-                        workspace,
-                        volt_id,
-                        volt_display_name,
-                        Some(spawned_by),
-                        Some(plugin_id),
-                        pwd,
-                        params.server_uri,
-                        params.server_args,
-                        params.options,
-                    ) {
-                        tracing::error!("{:?}", err);
-                    }
-                });
-            }
-            SendLspNotification::METHOD => {
-                let params: SendLspNotificationParams =
-                    serde_json::from_value(serde_json::to_value(params)?)?;
-                let lsp_id = params.id;
-                let method = params.method;
-                let params = params.params;
-
-                // The lsp ids we give the plugins are just the plugin id of the lsp
-                let plugin_id = PluginId(lsp_id);
-
-                if !self.spawned_lsp.contains_key(&plugin_id) {
-                    return Err(anyhow!("lsp not found, it may have exited"));
-                }
-
-                // Send the notification to the plugin
-                self.catalog_rpc.send_notification(
-                    Some(plugin_id),
-                    method.to_string(),
-                    params,
-                    None,
-                    None,
-                    false,
-                );
-            }
-            SendLspRequest::METHOD => {
-                let params: SendLspRequestParams =
-                    serde_json::from_value(serde_json::to_value(params)?)?;
-                let lsp_id = params.id;
-                let method = params.method;
-                let params = params.params;
-
-                // The lsp ids we give the plugins are just the plugin id of the lsp
-                let plugin_id = PluginId(lsp_id);
-
-                if !self.spawned_lsp.contains_key(&plugin_id) {
-                    return Err(anyhow!("lsp not found, it may have exited"));
-                }
-
-                // Send the request to the plugin
-                self.catalog_rpc.send_request(
-                    Some(plugin_id),
-                    None,
-                    method.to_string(),
-                    params,
-                    None,
-                    None,
-                    false,
-                    move |_, res| {
-                        // We just directly send it back to the plugin that requested this
-                        match res {
-                            Ok(res) => {
-                                resp.send(SendLspRequestResult { result: res });
-                            }
-                            Err(err) => {
-                                resp.send_err(err.code, err.message);
-                            }
-                        }
-                    },
-                )
-            }
-            _ => return Err(anyhow!("request not supported")),
+            _ => resp.send_err(-32601, format!("Unsupported LSP request: {method}")),
         }
 
         Ok(())
@@ -1098,42 +955,6 @@ impl PluginHostHandler {
         from: String,
     ) -> Result<()> {
         match method.as_str() {
-            // TODO: remove this after the next release and once we convert all the existing plugins to use the request.
-            StartLspServer::METHOD => {
-                self.core_rpc.log(
-                    lapce_rpc::core::LogLevel::Warn,
-                    format!(
-                        "[{}] Usage of startLspServer as a notification is deprecated.",
-                        self.volt_display_name
-                    ),
-                    Some(format!("lapce_proxy::plugin::psp::{}::{}::StartLspServer", self.volt_id.author, self.volt_id.name)),
-                );
-
-                let params: StartLspServerParams =
-                    serde_json::from_value(serde_json::to_value(params)?)?;
-                let workspace = self.workspace.clone();
-                let pwd = self.pwd.clone();
-                let catalog_rpc = self.catalog_rpc.clone();
-                let volt_id = self.volt_id.clone();
-                let volt_display_name = self.volt_display_name.clone();
-                thread::spawn(move || {
-                    if let Err(err) = LspClient::start(
-                        catalog_rpc,
-                        params.document_selector,
-                        workspace,
-                        volt_id,
-                        volt_display_name,
-                        None,
-                        None,
-                        pwd,
-                        params.server_uri,
-                        params.server_args,
-                        params.options,
-                    ) {
-                        tracing::error!("{:?}", err);
-                    }
-                });
-            }
             PublishDiagnostics::METHOD => {
                 let diagnostics: PublishDiagnosticsParams =
                     serde_json::from_value(serde_json::to_value(params)?)?;
@@ -1147,7 +968,7 @@ impl PluginHostHandler {
             ShowMessage::METHOD => {
                 let message: ShowMessageParams =
                     serde_json::from_value(serde_json::to_value(params)?)?;
-                let title = format!("Plugin: {}", self.volt_display_name);
+                let title = format!("Language server: {}", self.server_name);
                 self.catalog_rpc.core_rpc.show_message(title, message);
             }
             LogMessage::METHOD => {
@@ -1156,8 +977,8 @@ impl PluginHostHandler {
                 self.catalog_rpc.core_rpc.log_message(
                     message,
                     format!(
-                        "lapce_proxy::plugin::psp::{}::{}::LogMessage",
-                        self.volt_id.author, self.volt_id.name
+                        "lapce_proxy::plugin::rpc::{}::LogMessage",
+                        self.server_name
                     ),
                 );
             }
@@ -1187,8 +1008,8 @@ impl PluginHostHandler {
                     lapce_rpc::core::LogLevel::Warn,
                     format!("host notification {method} not handled"),
                     Some(format!(
-                        "lapce_proxy::plugin::psp::{}::{}::{method}",
-                        self.volt_id.author, self.volt_id.name
+                        "lapce_proxy::plugin::rpc::{}::{method}",
+                        self.server_name
                     )),
                 );
             }
@@ -1313,30 +1134,6 @@ impl PluginHostHandler {
         });
         f.call(result);
     }
-
-    pub fn handle_spawned_plugin_loaded(&mut self, plugin_id: PluginId) {
-        if let Some(info) = self.spawned_lsp.get_mut(&plugin_id) {
-            let Some(resp) = info.resp.take() else {
-                self.core_rpc.log(
-                    lapce_rpc::core::LogLevel::Warn,
-                    "Spawned lsp initialized twice?".to_string(),
-                    Some(format!(
-                        "{}::{}::handle_spawned_plugin_loaded",
-                        self.volt_id.author, self.volt_id.name
-                    )),
-                );
-                return;
-            };
-
-            resp.send(StartLspServerResult { id: plugin_id.0 });
-        }
-    }
-}
-
-/// Information that a plugin associates with a spawned language server.
-struct SpawnedLspInfo {
-    /// The response sender to use when the lsp is initialized.
-    resp: Option<ResponseSender>,
 }
 
 fn get_document_content_change(
@@ -1440,5 +1237,50 @@ fn semantic_tokens_legend(
         SemanticTokensServerCapabilities::SemanticTokensRegistrationOptions(
             options,
         ) => &options.semantic_tokens_options.legend,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lapce_rpc::proxy::ProxyRpcHandler;
+
+    #[test]
+    fn language_server_host_rejects_removed_extension_requests() {
+        let core = CoreRpcHandler::new();
+        let catalog =
+            PluginCatalogRpcHandler::new(core.clone(), ProxyRpcHandler::new());
+        let (io, _messages) = crossbeam_channel::unbounded();
+        let mut host = PluginHostHandler::new(
+            "Test language server".into(),
+            vec![],
+            core,
+            PluginServerRpcHandler::new(io),
+            catalog,
+        );
+        for method in [
+            "host/executeProcess",
+            "host/startLspServer",
+            "host/sendLspRequest",
+            "host/sendLspNotification",
+            "host/registerDebuggerType",
+        ] {
+            let (tx, rx) = crossbeam_channel::bounded(1);
+            host.handle_request(
+                Id::Num(1),
+                method.into(),
+                Params::None(()),
+                ResponseSender::new(tx),
+            );
+            assert_eq!(rx.recv().unwrap().unwrap_err().code, -32601, "{method}");
+        }
+        let (tx, rx) = crossbeam_channel::bounded(1);
+        host.handle_request(
+            Id::Num(2),
+            WorkDoneProgressCreate::METHOD.into(),
+            Params::None(()),
+            ResponseSender::new(tx),
+        );
+        assert_eq!(rx.recv().unwrap().unwrap(), Value::Null);
     }
 }

@@ -85,9 +85,7 @@ impl ProxyHandler for Dispatcher {
         match rpc {
             Initialize {
                 workspace,
-                disabled_volts,
-                extra_plugin_paths,
-                plugin_configurations,
+                language_server_configurations,
                 ..
             } => {
                 self.workspace = workspace;
@@ -106,9 +104,7 @@ impl ProxyHandler for Dispatcher {
                 thread::spawn(move || {
                     let mut plugin = PluginCatalog::new(
                         workspace,
-                        disabled_volts,
-                        extra_plugin_paths,
-                        plugin_configurations,
+                        language_server_configurations,
                         plugin_rpc.clone(),
                     );
                     plugin_rpc.mainloop(&mut plugin);
@@ -179,11 +175,7 @@ impl ProxyHandler for Dispatcher {
                 }
                 self.proxy_rpc.shutdown();
             }
-            UpdatePluginConfigs { configs } => {
-                if let Err(err) = self.catalog_rpc.update_plugin_configs(configs) {
-                    tracing::error!("{:?}", err);
-                }
-            }
+
             NewTerminal { term_id, profile } => {
                 let mut terminal = match Terminal::new(term_id, profile, 50, 10) {
                     Ok(terminal) => terminal,
@@ -249,28 +241,7 @@ impl ProxyHandler for Dispatcher {
             | DapDisconnect { .. }
             | DapRestart { .. }
             | DapSetBreakpoints { .. } => {}
-            InstallVolt { volt } => {
-                let catalog_rpc = self.catalog_rpc.clone();
-                if let Err(err) = catalog_rpc.install_volt(volt) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            ReloadVolt { volt } => {
-                if let Err(err) = self.catalog_rpc.reload_volt(volt) {
-                    tracing::error!("{:?}", err);
-                }
-            }
-            RemoveVolt { volt } => {
-                self.catalog_rpc.remove_volt(volt);
-            }
-            DisableVolt { volt } => {
-                self.catalog_rpc.stop_volt(volt);
-            }
-            EnableVolt { volt } => {
-                if let Err(err) = self.catalog_rpc.enable_volt(volt) {
-                    tracing::error!("{:?}", err);
-                }
-            }
+
             LspCancel { id } => {
                 self.catalog_rpc.send_notification(
                     None,

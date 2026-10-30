@@ -124,7 +124,7 @@ fn run(
             ..Default::default()
         },
         local_backend: options.backend,
-        plugin_configurations: options.lsp.map(|executable| std::collections::HashMap::from([("lapce-native-lsp".into(), std::collections::HashMap::from([("servers".into(), serde_json::json!([{ "language": "rust", "executable": executable }]))]))])).unwrap_or_default(),
+        language_server_configurations: options.lsp.map(|executable| std::collections::HashMap::from([("lapce-native-lsp".into(), std::collections::HashMap::from([("servers".into(), serde_json::json!([{ "language": "rust", "executable": executable }]))]))])).unwrap_or_default(),
         ..Default::default()
     })
     .map_err(|e| e.to_string())?;

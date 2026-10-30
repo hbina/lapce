@@ -1,4 +1,4 @@
-use std::{path::PathBuf, rc::Rc, sync::Arc};
+use std::{rc::Rc, sync::Arc};
 
 use floem::{
     ViewId,
@@ -52,7 +52,6 @@ pub struct WindowCommonData {
     // the value to be update by cursor blinking
     pub hide_cursor: RwSignal<bool>,
     pub app_view_id: RwSignal<ViewId>,
-    pub extra_plugin_paths: Arc<Vec<PathBuf>>,
 }
 
 /// `WindowData` is the application model for a top-level window.
@@ -90,12 +89,10 @@ impl WindowData {
         info: WindowInfo,
         window_scale: RwSignal<f64>,
         latest_release: ReadSignal<Arc<Option<ReleaseInfo>>>,
-        extra_plugin_paths: Arc<Vec<PathBuf>>,
         app_command: Listener<AppCommand>,
     ) -> Self {
         let cx = Scope::new();
-        let config =
-            LapceConfig::load(&LapceWorkspace::default(), &[], &extra_plugin_paths);
+        let config = LapceConfig::load(&LapceWorkspace::default());
         let config = cx.create_rw_signal(Arc::new(config));
         let root_view_id = cx.create_rw_signal(ViewId::new());
 
@@ -123,7 +120,6 @@ impl WindowData {
             cursor_blink_timer,
             hide_cursor,
             app_view_id,
-            extra_plugin_paths,
         });
 
         for w in info.tabs.workspaces {
@@ -187,11 +183,7 @@ impl WindowData {
     }
 
     pub fn reload_config(&self) {
-        let config = LapceConfig::load(
-            &LapceWorkspace::default(),
-            &[],
-            &self.common.extra_plugin_paths,
-        );
+        let config = LapceConfig::load(&LapceWorkspace::default());
         self.config.set(Arc::new(config));
         let window_tabs = self.window_tabs.get_untracked();
         for (_, window_tab) in window_tabs {

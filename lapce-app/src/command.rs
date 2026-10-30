@@ -11,7 +11,6 @@ use lapce_core::command::{
     MultiSelectionCommand, ScrollCommand,
 };
 use lapce_rpc::{
-    plugin::VoltID,
     proxy::ProxyStatus,
     terminal::{TermId, TerminalProfile},
 };
@@ -310,10 +309,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Open Themes Directory")]
     OpenThemesDirectory,
 
-    #[strum(serialize = "open_plugins_directory")]
-    #[strum(message = "Open Plugins Directory")]
-    OpenPluginsDirectory,
-
     #[strum(serialize = "open_grammars_directory")]
     #[strum(message = "Open Grammars Directory")]
     OpenGrammarsDirectory,
@@ -470,10 +465,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(serialize = "toggle_source_control_focus")]
     ToggleSourceControlFocus,
 
-    #[strum(message = "Toggle Plugin Focus")]
-    #[strum(serialize = "toggle_plugin_focus")]
-    TogglePluginFocus,
-
     #[strum(message = "Toggle File Explorer Focus")]
     #[strum(serialize = "toggle_file_explorer_focus")]
     ToggleFileExplorerFocus,
@@ -492,9 +483,6 @@ pub enum LapceWorkbenchCommand {
 
     #[strum(serialize = "toggle_source_control_visual")]
     ToggleSourceControlVisual,
-
-    #[strum(serialize = "toggle_plugin_visual")]
-    TogglePluginVisual,
 
     #[strum(serialize = "toggle_file_explorer_visual")]
     ToggleFileExplorerVisual,
@@ -731,9 +719,6 @@ pub enum InternalCommand {
         status: ProxyStatus,
     },
 
-    OpenVoltView {
-        volt_id: VoltID,
-    },
     ResetBlinkCursor,
     OpenDiffFiles {
         left_path: PathBuf,

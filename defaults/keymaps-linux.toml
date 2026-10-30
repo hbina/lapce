@@ -258,10 +258,6 @@ key = "ctrl+shift+f"
 command = "toggle_search_focus"
 
 [[keymaps]]
-key = "ctrl+shift+x"
-command = "toggle_plugin_focus"
-
-[[keymaps]]
 key = "ctrl+shift+m"
 command = "toggle_problem_focus"
 

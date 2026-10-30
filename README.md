@@ -60,6 +60,9 @@ cargo run --profile ci --bin lapce-iced -- /path/to/workspace
 Frontend implementations remain separate workspace library crates; select the
 executable from the root package with `--bin`, without a `-p` option.
 
+Language support uses [native LSP server executables](docs/native-language-servers.md).
+Volt/WASM extensions and the extension marketplace have been removed.
+
 ## Contributing
 
 Guidelines for contributing to Lapce can be found in [`CONTRIBUTING.md`](CONTRIBUTING.md).

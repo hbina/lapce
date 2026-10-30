@@ -8,7 +8,6 @@ color-theme = "Lapce Dark"
 icon-theme = "Lapce Codicons"
 custom-titlebar = true
 file-explorer-double-click = false
-auto-reload-plugin = false
 
 [editor]
 font-family = "monospace"

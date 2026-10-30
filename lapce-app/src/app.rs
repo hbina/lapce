@@ -95,7 +95,6 @@ use crate::{
         item::{PaletteItem, PaletteItemContent},
     },
     panel::{position::PanelContainerPosition, view::panel_container_view},
-    plugin::{PluginData, plugin_info_view},
     settings::{settings_view, theme_color_settings_view},
     status::status,
     text_input::TextInputBuilder,
@@ -121,14 +120,6 @@ struct Cli {
     /// Don't return instantly when opened in a terminal
     #[clap(short, long, action)]
     wait: bool,
-
-    /// Path(s) to plugins to load.
-    ///
-    /// This is primarily used for plugin development to make it easier to test changes to the
-    /// plugin without needing to copy the plugin to the plugins directory.
-    /// This will cause any plugin with the same author & name to not run.
-    #[clap(long, action)]
-    plugin_path: Vec<PathBuf>,
 
     /// Paths to file(s) and/or folder(s) to open.
     /// When path is a file (that exists or not),
@@ -165,14 +156,11 @@ pub struct AppData {
     pub watcher: Arc<notify::RecommendedWatcher>,
     pub tracing_handle: Handle<Targets>,
     pub config: RwSignal<Arc<LapceConfig>>,
-    /// Paths to extra plugins to load
-    pub plugin_paths: Arc<Vec<PathBuf>>,
 }
 
 impl AppData {
     pub fn reload_config(&self) {
-        let config =
-            LapceConfig::load(&LapceWorkspace::default(), &[], &self.plugin_paths);
+        let config = LapceConfig::load(&LapceWorkspace::default());
 
         self.config.set(Arc::new(config));
         self.window_scale.set(self.config.get().ui.scale());
@@ -440,7 +428,6 @@ impl AppData {
             info,
             self.window_scale,
             self.latest_release.read_only(),
-            self.plugin_paths.clone(),
             self.app_command,
         );
 
@@ -661,7 +648,7 @@ fn editor_tab_header(
     dragging: RwSignal<Option<(RwSignal<usize>, EditorTabId)>>,
 ) -> impl View {
     let main_split = window_tab_data.main_split.clone();
-    let plugin = window_tab_data.plugin.clone();
+
     let editors = window_tab_data.main_split.editors;
     let diff_editors = window_tab_data.main_split.diff_editors;
     let focus = window_tab_data.common.focus;
@@ -704,9 +691,9 @@ fn editor_tab_header(
         let child_for_mouse_close = child.clone();
         let child_for_mouse_close_2 = child.clone();
         let main_split = main_split.clone();
-        let plugin = plugin.clone();
+
         let child_view = {
-            let info = child.view_info(editors, diff_editors, plugin, config);
+            let info = child.view_info(editors, diff_editors, config);
             let hovered = create_rw_signal(false);
 
             use crate::config::ui::TabCloseButton;
@@ -1202,7 +1189,7 @@ fn editor_tab_header(
 
 fn editor_tab_content(
     window_tab_data: Rc<WindowTabData>,
-    plugin: PluginData,
+
     active_editor_tab: ReadSignal<Option<EditorTabId>>,
     editor_tab: RwSignal<EditorTabData>,
 ) -> impl View {
@@ -1380,16 +1367,11 @@ fn editor_tab_content(
                     text("empty diff editor").into_any()
                 }
             }
-            EditorTabChild::Settings(_) => {
-                settings_view(plugin.installed, editors, common).into_any()
-            }
+            EditorTabChild::Settings(_) => settings_view(editors, common).into_any(),
             EditorTabChild::ThemeColorSettings(_) => {
                 theme_color_settings_view(editors, common).into_any()
             }
             EditorTabChild::Keymap(_) => keymap_view(editors, common).into_any(),
-            EditorTabChild::Volt(_, id) => {
-                plugin_info_view(plugin.clone(), id).into_any()
-            }
         };
         child.style(|s| s.size_full())
     };
@@ -1411,7 +1393,7 @@ enum DragOverPosition {
 
 fn editor_tab(
     window_tab_data: Rc<WindowTabData>,
-    plugin: PluginData,
+
     active_editor_tab: ReadSignal<Option<EditorTabId>>,
     editor_tab: RwSignal<EditorTabData>,
     dragging: RwSignal<Option<(RwSignal<usize>, EditorTabId)>>,
@@ -1436,7 +1418,6 @@ fn editor_tab(
         stack((
             editor_tab_content(
                 window_tab_data.clone(),
-                plugin.clone(),
                 active_editor_tab,
                 editor_tab,
             ),
@@ -1881,7 +1862,7 @@ fn split_border(
 fn split_list(
     split: ReadSignal<SplitData>,
     window_tab_data: Rc<WindowTabData>,
-    plugin: PluginData,
+
     dragging: RwSignal<Option<(RwSignal<usize>, EditorTabId)>>,
 ) -> impl View {
     let main_split = window_tab_data.main_split.clone();
@@ -1903,7 +1884,6 @@ fn split_list(
             usize,
             (RwSignal<f64>, SplitContent),
         )| {
-            let plugin = plugin.clone();
             let child = match &content {
                 SplitContent::EditorTab(editor_tab_id) => {
                     let editor_tab_data = editor_tabs
@@ -1911,7 +1891,6 @@ fn split_list(
                     if let Some(editor_tab_data) = editor_tab_data {
                         editor_tab(
                             window_tab_data.clone(),
-                            plugin.clone(),
                             active_editor_tab,
                             editor_tab_data,
                             dragging,
@@ -1928,7 +1907,6 @@ fn split_list(
                         split_list(
                             split.read_only(),
                             window_tab_data.clone(),
-                            plugin.clone(),
                             dragging,
                         )
                         .into_any()
@@ -2015,27 +1993,22 @@ fn main_split(window_tab_data: Rc<WindowTabData>) -> impl View {
         .read_only();
     let config = window_tab_data.main_split.common.config;
     let panel = window_tab_data.panel.clone();
-    let plugin = window_tab_data.plugin.clone();
+
     let dragging: RwSignal<Option<(RwSignal<usize>, EditorTabId)>> =
         create_rw_signal(None);
-    split_list(
-        root_split,
-        window_tab_data.clone(),
-        plugin.clone(),
-        dragging,
-    )
-    .style(move |s| {
-        let config = config.get();
-        let is_hidden = panel.panel_bottom_maximized(true)
-            && panel.is_container_shown(&PanelContainerPosition::Bottom, true);
-        s.border_color(config.color(LapceColor::LAPCE_BORDER))
-            .background(config.color(LapceColor::EDITOR_BACKGROUND))
-            .apply_if(is_hidden, |s| s.display(Display::None))
-            .width_full()
-            .flex_grow(1.0f32)
-            .flex_basis(0.0)
-    })
-    .debug_name("Main Split")
+    split_list(root_split, window_tab_data.clone(), dragging)
+        .style(move |s| {
+            let config = config.get();
+            let is_hidden = panel.panel_bottom_maximized(true)
+                && panel.is_container_shown(&PanelContainerPosition::Bottom, true);
+            s.border_color(config.color(LapceColor::LAPCE_BORDER))
+                .background(config.color(LapceColor::EDITOR_BACKGROUND))
+                .apply_if(is_hidden, |s| s.display(Display::None))
+                .width_full()
+                .flex_grow(1.0f32)
+                .flex_basis(0.0)
+        })
+        .debug_name("Main Split")
 }
 
 pub fn not_clickable_icon<S: std::fmt::Display + 'static>(
@@ -3620,8 +3593,7 @@ pub fn launch() {
         return;
     }
 
-    // If the cli is not requesting a new window, and we're not developing a plugin, we try to open
-    // in the existing Lapce process
+    // Open in the existing process unless a new window was requested.
     if !cli.new {
         match get_socket() {
             Ok(socket) => {
@@ -3656,8 +3628,6 @@ pub fn launch() {
     let latest_release = scope.create_rw_signal(Arc::new(None));
     let app_command = Listener::new_empty(scope);
 
-    let plugin_paths = Arc::new(cli.plugin_path);
-
     let (tx, rx) = channel();
     let mut watcher = notify::recommended_watcher(ConfigWatcher::new(tx))
         .context("Failed to spawn file watcher")
@@ -3677,14 +3647,9 @@ pub fn launch() {
             tracing::error!("{:?}", err);
         }
     }
-    if let Some(path) = Directory::plugins_directory() {
-        if let Err(err) = watcher.watch(&path, notify::RecursiveMode::Recursive) {
-            tracing::error!("{:?}", err);
-        }
-    }
 
     let windows = scope.create_rw_signal(im::HashMap::new());
-    let config = LapceConfig::load(&LapceWorkspace::default(), &[], &plugin_paths);
+    let config = LapceConfig::load(&LapceWorkspace::default());
 
     // Restore scale from config
     window_scale.set(config.ui.scale());
@@ -3700,7 +3665,6 @@ pub fn launch() {
         app_command,
         tracing_handle: reload_handle,
         config,
-        plugin_paths,
     };
 
     let app = app_data.create_windows(db.clone(), cli.paths);

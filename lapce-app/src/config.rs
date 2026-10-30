@@ -8,8 +8,6 @@ use ::core::slice;
 use floem::{peniko::Color, prelude::palette::css};
 use itertools::Itertools;
 use lapce_core::directory::Directory;
-use lapce_rpc::plugin::VoltID;
-use lapce_services::plugin::find_all_volts;
 use lsp_types::{CompletionItemKind, SymbolKind};
 use once_cell::sync::Lazy;
 use parking_lot::RwLock;
@@ -105,7 +103,7 @@ pub struct LapceConfig {
     #[serde(default)]
     pub icon_theme: IconThemeConfig,
     #[serde(flatten)]
-    pub plugins: HashMap<String, HashMap<String, serde_json::Value>>,
+    pub language_servers: HashMap<String, HashMap<String, serde_json::Value>>,
     #[serde(skip)]
     pub color: ThemeColor,
     #[serde(skip)]
@@ -129,11 +127,7 @@ pub struct LapceConfig {
 }
 
 impl LapceConfig {
-    pub fn load(
-        workspace: &LapceWorkspace,
-        disabled_volts: &[VoltID],
-        extra_plugin_paths: &[PathBuf],
-    ) -> Self {
+    pub fn load(workspace: &LapceWorkspace) -> Self {
         let config = Self::merge_config(workspace, None, None);
         let mut lapce_config: LapceConfig = match config.try_deserialize() {
             Ok(config) => config,
@@ -143,10 +137,8 @@ impl LapceConfig {
             }
         };
 
-        lapce_config.available_color_themes =
-            Self::load_color_themes(disabled_volts, extra_plugin_paths);
-        lapce_config.available_icon_themes =
-            Self::load_icon_themes(disabled_volts, extra_plugin_paths);
+        lapce_config.available_color_themes = Self::load_color_themes();
+        lapce_config.available_icon_themes = Self::load_icon_themes();
         lapce_config.resolve_theme(workspace);
 
         lapce_config.color_theme_list = lapce_config
@@ -294,23 +286,14 @@ impl LapceConfig {
             if let Some(icon_theme_path) = icon_theme_path {
                 self.icon_theme.path = icon_theme_path.clone().unwrap_or_default();
             }
-            self.plugins = new.plugins;
+            self.language_servers = new.language_servers;
         }
         self.resolve_colors(Some(&default_lapce_config));
         self.update_id();
     }
 
-    fn load_color_themes(
-        disabled_volts: &[VoltID],
-        extra_plugin_paths: &[PathBuf],
-    ) -> HashMap<String, (String, config::Config)> {
+    fn load_color_themes() -> HashMap<String, (String, config::Config)> {
         let mut themes = Self::load_local_themes().unwrap_or_default();
-
-        for (key, theme) in
-            Self::load_plugin_color_themes(disabled_volts, extra_plugin_paths)
-        {
-            themes.insert(key, theme);
-        }
 
         let (name, theme) =
             Self::load_color_theme_from_str(DEFAULT_LIGHT_THEME).unwrap();
@@ -455,17 +438,9 @@ impl LapceConfig {
         Some((name, config))
     }
 
-    fn load_icon_themes(
-        disabled_volts: &[VoltID],
-        extra_plugin_paths: &[PathBuf],
-    ) -> HashMap<String, (String, config::Config, Option<PathBuf>)> {
+    fn load_icon_themes()
+    -> HashMap<String, (String, config::Config, Option<PathBuf>)> {
         let mut themes = HashMap::new();
-
-        for (key, (name, theme, path)) in
-            Self::load_plugin_icon_themes(disabled_volts, extra_plugin_paths)
-        {
-            themes.insert(key, (name, theme, Some(path)));
-        }
 
         let (name, theme) =
             Self::load_icon_theme_from_str(DEFAULT_ICON_THEME).unwrap();
@@ -482,69 +457,6 @@ impl LapceConfig {
         let table = config.get_table("icon-theme").ok()?;
         let name = table.get("name")?.to_string();
         Some((name, config))
-    }
-
-    fn load_plugin_color_themes(
-        disabled_volts: &[VoltID],
-        extra_plugin_paths: &[PathBuf],
-    ) -> HashMap<String, (String, config::Config)> {
-        let mut themes: HashMap<String, (String, config::Config)> = HashMap::new();
-        for meta in find_all_volts(extra_plugin_paths) {
-            if disabled_volts.contains(&meta.id()) {
-                continue;
-            }
-            if let Some(plugin_themes) = meta.color_themes.as_ref() {
-                for theme_path in plugin_themes {
-                    if let Some((key, theme)) =
-                        Self::load_color_theme(&PathBuf::from(theme_path))
-                    {
-                        themes.insert(key, theme);
-                    }
-                }
-            }
-        }
-        themes
-    }
-
-    fn load_plugin_icon_themes(
-        disabled_volts: &[VoltID],
-        extra_plugin_paths: &[PathBuf],
-    ) -> HashMap<String, (String, config::Config, PathBuf)> {
-        let mut themes: HashMap<String, (String, config::Config, PathBuf)> =
-            HashMap::new();
-        for meta in find_all_volts(extra_plugin_paths) {
-            if disabled_volts.contains(&meta.id()) {
-                continue;
-            }
-            if let Some(plugin_themes) = meta.icon_themes.as_ref() {
-                for theme_path in plugin_themes {
-                    if let Some((key, theme)) =
-                        Self::load_icon_theme(&PathBuf::from(theme_path))
-                    {
-                        themes.insert(key, theme);
-                    }
-                }
-            }
-        }
-        themes
-    }
-
-    fn load_icon_theme(
-        path: &Path,
-    ) -> Option<(String, (String, config::Config, PathBuf))> {
-        if !path.is_file() {
-            return None;
-        }
-        let config = config::Config::builder()
-            .add_source(config::File::from(path))
-            .build()
-            .ok()?;
-        let table = config.get_table("icon-theme").ok()?;
-        let name = table.get("name")?.to_string();
-        Some((
-            name.to_lowercase(),
-            (name, config, path.parent().unwrap().to_path_buf()),
-        ))
     }
 
     pub fn export_theme(&self) -> String {
@@ -1020,6 +932,35 @@ impl LapceConfig {
 #[cfg(test)]
 mod read_only_settings_tests {
     use super::*;
+
+    #[test]
+    fn native_language_server_settings_reach_backend_configuration() {
+        let settings = config::Config::builder()
+            .add_source(config::File::from_str(
+                DEFAULT_SETTINGS,
+                config::FileFormat::Toml,
+            ))
+            .add_source(config::File::from_str(
+                r#"
+                [[lapce-native-lsp.servers]]
+                language = "rust"
+                executable = "/opt/lsp/rust-analyzer"
+                arguments = ["--log-file", "/tmp/lsp.log"]
+                options = { checkOnSave = false }
+            "#,
+                config::FileFormat::Toml,
+            ))
+            .build()
+            .unwrap();
+        let loaded: LapceConfig = settings.try_deserialize().unwrap();
+        assert_eq!(
+            loaded.language_servers["lapce-native-lsp"]["servers"],
+            serde_json::json!([{
+                "language": "rust", "executable": "/opt/lsp/rust-analyzer",
+                "arguments": ["--log-file", "/tmp/lsp.log"], "options": {"checkOnSave": false}
+            }])
+        );
+    }
     #[test]
     fn legacy_save_settings_load_but_are_not_exposed_or_serialized() {
         let editor = LapceConfig::default_lapce_config().editor;

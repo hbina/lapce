@@ -34,7 +34,6 @@ impl LapceIcons {
     pub const TERMINAL: &'static str = "terminal";
     pub const SETTINGS: &'static str = "settings";
     pub const LIGHTBULB: &'static str = "lightbulb";
-    pub const EXTENSIONS: &'static str = "extensions";
     pub const KEYBOARD: &'static str = "keyboard";
     pub const BREADCRUMB_SEPARATOR: &'static str = "breadcrumb_separator";
     pub const SYMBOL_COLOR: &'static str = "symbol_color";

@@ -1,8 +1,7 @@
 pub mod catalog;
 pub mod lsp;
 mod native;
-pub mod psp;
-pub mod wasi;
+pub mod rpc;
 
 use std::{
     borrow::Cow,
@@ -12,18 +11,14 @@ use std::{
         Arc,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
     },
-    time::Duration,
 };
 
 use anyhow::{Result, anyhow};
 use crossbeam_channel::{Receiver, Sender};
 use dyn_clone::DynClone;
 use lapce_rpc::{
-    RequestId, RpcError,
-    core::CoreRpcHandler,
-    plugin::{PluginId, VoltInfo, VoltMetadata},
-    proxy::ProxyRpcHandler,
-    style::LineStyle,
+    RequestId, RpcError, core::CoreRpcHandler, plugin::PluginId,
+    proxy::ProxyRpcHandler, style::LineStyle,
 };
 use lapce_xi_rope::{Rope, RopeDelta};
 use lsp_types::{
@@ -69,18 +64,14 @@ use lsp_types::{
     },
 };
 use parking_lot::Mutex;
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Map, Value};
-use tracing::error;
 
 use self::{
     catalog::PluginCatalog,
-    psp::{CloneableCallback, PluginServerRpcHandler, RpcCallback},
-    wasi::start_volt,
+    rpc::{CloneableCallback, PluginServerRpcHandler, RpcCallback},
 };
 use crate::buffer::language_id_from_path;
-
-pub type PluginName = String;
 
 #[allow(clippy::large_enum_variant)]
 pub enum PluginCatalogRpc {
@@ -128,22 +119,13 @@ pub enum PluginCatalogRpc {
         text: Rope,
     },
     Handler(PluginCatalogNotification),
-    RemoveVolt {
-        volt: VoltInfo,
-        f: Box<dyn CloneableCallback<Value, RpcError>>,
-    },
+
     Shutdown,
 }
 
 #[allow(clippy::large_enum_variant)]
 pub enum PluginCatalogNotification {
-    UpdatePluginConfigs(HashMap<String, HashMap<String, serde_json::Value>>),
-    UnactivatedVolts(Vec<VoltMetadata>),
     PluginServerLoaded(PluginServerRpcHandler),
-    InstallVolt(VoltInfo),
-    StopVolt(VoltInfo),
-    EnableVolt(VoltInfo),
-    ReloadVolt(VoltMetadata),
     Shutdown,
 }
 
@@ -270,9 +252,6 @@ impl PluginCatalogRpcHandler {
                 }
                 PluginCatalogRpc::Shutdown => {
                     return;
-                }
-                PluginCatalogRpc::RemoveVolt { volt, f } => {
-                    plugin.shutdown_volt(volt, f);
                 }
             }
         }
@@ -1257,10 +1236,6 @@ impl PluginCatalogRpcHandler {
         }
     }
 
-    pub fn unactivated_volts(&self, volts: Vec<VoltMetadata>) -> Result<()> {
-        self.catalog_notification(PluginCatalogNotification::UnactivatedVolts(volts))
-    }
-
     pub fn plugin_server_loaded(
         &self,
         plugin: PluginServerRpcHandler,
@@ -1269,148 +1244,6 @@ impl PluginCatalogRpcHandler {
             plugin,
         ))
     }
-
-    pub fn update_plugin_configs(
-        &self,
-        configs: HashMap<String, HashMap<String, serde_json::Value>>,
-    ) -> Result<()> {
-        self.catalog_notification(PluginCatalogNotification::UpdatePluginConfigs(
-            configs,
-        ))
-    }
-
-    pub fn install_volt(&self, volt: VoltInfo) -> Result<()> {
-        self.catalog_notification(PluginCatalogNotification::InstallVolt(volt))
-    }
-
-    pub fn stop_volt(&self, volt: VoltInfo) {
-        let rpc = PluginCatalogRpc::RemoveVolt {
-            volt,
-            f: Box::new(|_id: PluginId, rs: Result<Value, RpcError>| {
-                if let Err(e) = rs {
-                    // maybe should send notification
-                    error!("{:?}", e);
-                }
-            }),
-        };
-        if let Err(err) = self.plugin_tx.send(rpc) {
-            tracing::error!("{:?}", err);
-        }
-    }
-
-    pub fn remove_volt(&self, volt: VoltMetadata) {
-        let catalog_rpc = self.clone();
-        let volt_clone = volt.clone();
-        let rpc = PluginCatalogRpc::RemoveVolt {
-            volt: volt.info(),
-            f: Box::new(|_id: PluginId, rs: Result<Value, RpcError>| {
-                if let Err(e) = rs {
-                    // maybe should send notification
-                    error!("{:?}", e);
-                } else if let Err(e) = remove_volt(catalog_rpc, volt_clone) {
-                    error!("{:?}", e);
-                }
-            }),
-        };
-        if let Err(err) = self.plugin_tx.send(rpc) {
-            tracing::error!("{:?}", err);
-        }
-    }
-
-    pub fn reload_volt(&self, volt: VoltMetadata) -> Result<()> {
-        self.catalog_notification(PluginCatalogNotification::ReloadVolt(volt))
-    }
-
-    pub fn enable_volt(&self, volt: VoltInfo) -> Result<()> {
-        self.catalog_notification(PluginCatalogNotification::EnableVolt(volt))
-    }
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-#[serde(rename_all = "snake_case")]
-#[serde(tag = "method", content = "params")]
-pub enum PluginNotification {
-    StartLspServer {
-        exec_path: String,
-        language_id: String,
-        options: Option<Value>,
-        system_lsp: Option<bool>,
-    },
-    DownloadFile {
-        url: String,
-        path: PathBuf,
-    },
-    LockFile {
-        path: PathBuf,
-    },
-    MakeFileExecutable {
-        path: PathBuf,
-    },
-}
-
-pub use lapce_services::plugin::{download_volt, volt_icon};
-
-pub fn install_volt(
-    catalog_rpc: PluginCatalogRpcHandler,
-    workspace: Option<PathBuf>,
-    configurations: Option<HashMap<String, serde_json::Value>>,
-    volt: VoltInfo,
-) -> Result<()> {
-    let download_volt_result = download_volt(&volt);
-    if download_volt_result.is_err() {
-        catalog_rpc
-            .core_rpc
-            .volt_installing(volt, "Could not download Plugin".to_string());
-    }
-    let meta = download_volt_result?;
-    let local_catalog_rpc = catalog_rpc.clone();
-    let local_meta = meta.clone();
-
-    if let Err(err) =
-        start_volt(workspace, configurations, local_catalog_rpc, local_meta)
-    {
-        tracing::error!("{:?}", err);
-    }
-    let icon = volt_icon(&meta);
-    catalog_rpc.core_rpc.volt_installed(meta, icon);
-    Ok(())
-}
-
-pub fn remove_volt(
-    catalog_rpc: PluginCatalogRpcHandler,
-    volt: VoltMetadata,
-) -> Result<()> {
-    std::thread::spawn(move || -> Result<()> {
-        let path = volt.dir.as_ref().ok_or_else(|| {
-            catalog_rpc
-                .core_rpc
-                .volt_removing(volt.clone(), "Plugin Directory not set".to_string());
-            anyhow::anyhow!("don't have dir")
-        })?;
-        let mut rs = Ok(());
-        // Try to remove dir
-        // This is due to some operating systems not releasing immediately, such as Windows.
-        for _ in 0..2 {
-            rs = std::fs::remove_dir_all(path);
-            if rs.is_err() {
-                std::thread::sleep(Duration::from_millis(500));
-            } else {
-                break;
-            }
-        }
-        if let Err(e) = rs {
-            error!("remove_dir_all {:?}", e);
-            eprintln!("Could not delete plugin folder: {e}");
-            catalog_rpc.core_rpc.volt_removing(
-                volt.clone(),
-                "Could not remove Plugin Directory".to_string(),
-            );
-        } else {
-            catalog_rpc.core_rpc.volt_removed(volt.info(), false);
-        }
-        Ok(())
-    });
-    Ok(())
 }
 
 fn client_capabilities() -> ClientCapabilities {

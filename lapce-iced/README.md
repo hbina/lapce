@@ -25,7 +25,8 @@ open the destination file at its line; symbol results provide the same navigatio
 Hover and language responses appear in the bottom pane along with diagnostics.
 External file changes refresh the document through the shared engine session.
 
-For Rust language navigation, supply an actual rust-analyzer executable:
+Language support uses [native LSP servers](../docs/native-language-servers.md);
+WASM Volts are not supported. For Rust navigation, supply an actual rust-analyzer executable:
 
 ```sh
 target/ci/lapce-iced --lsp "$(rustup which rust-analyzer)" /path/to/rust/workspace

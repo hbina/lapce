@@ -22,14 +22,13 @@ use lsp_types::{
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 
-use super::plugin::VoltID;
 use crate::{
     RequestId, RpcError, RpcMessage,
     buffer::BufferId,
     dap_types::{self, DapId, RunDebugConfig, SourceBreakpoint, ThreadId},
     file::{DirectoryEntry, PathObject},
     file_line::FileLine,
-    plugin::{PluginId, VoltInfo, VoltMetadata},
+    plugin::PluginId,
     source_control::FileDiff,
     style::SemanticStyles,
     terminal::{TermId, TerminalProfile},
@@ -327,10 +326,9 @@ impl ProxyRequest {
 pub enum ProxyNotification {
     Initialize {
         workspace: Option<PathBuf>,
-        disabled_volts: Vec<VoltID>,
-        /// Paths to extra plugins that should be loaded
-        extra_plugin_paths: Vec<PathBuf>,
-        plugin_configurations: HashMap<String, HashMap<String, serde_json::Value>>,
+
+        language_server_configurations:
+            HashMap<String, HashMap<String, serde_json::Value>>,
         /// Legacy wire placeholders for older proxies; no session ownership depends on them.
         #[serde(default)]
         window_id: usize,
@@ -355,28 +353,12 @@ pub enum ProxyNotification {
         path: PathBuf,
         position: Position,
     },
-    UpdatePluginConfigs {
-        configs: HashMap<String, HashMap<String, serde_json::Value>>,
-    },
+
     NewTerminal {
         term_id: TermId,
         profile: TerminalProfile,
     },
-    InstallVolt {
-        volt: VoltInfo,
-    },
-    RemoveVolt {
-        volt: VoltMetadata,
-    },
-    ReloadVolt {
-        volt: VoltMetadata,
-    },
-    DisableVolt {
-        volt: VoltInfo,
-    },
-    EnableVolt {
-        volt: VoltInfo,
-    },
+
     LspCancel {
         id: i32,
     },
@@ -754,26 +736,6 @@ impl ProxyRpcHandler {
         self.notification(ProxyNotification::LspCancel { id });
     }
 
-    pub fn install_volt(&self, volt: VoltInfo) {
-        self.notification(ProxyNotification::InstallVolt { volt });
-    }
-
-    pub fn reload_volt(&self, volt: VoltMetadata) {
-        self.notification(ProxyNotification::ReloadVolt { volt });
-    }
-
-    pub fn remove_volt(&self, volt: VoltMetadata) {
-        self.notification(ProxyNotification::RemoveVolt { volt });
-    }
-
-    pub fn disable_volt(&self, volt: VoltInfo) {
-        self.notification(ProxyNotification::DisableVolt { volt });
-    }
-
-    pub fn enable_volt(&self, volt: VoltInfo) {
-        self.notification(ProxyNotification::EnableVolt { volt });
-    }
-
     pub fn shutdown(&self) {
         self.notification(ProxyNotification::Shutdown {});
         if let Err(err) = self.tx.send(ProxyRpc::Shutdown) {
@@ -784,15 +746,15 @@ impl ProxyRpcHandler {
     pub fn initialize(
         &self,
         workspace: Option<PathBuf>,
-        disabled_volts: Vec<VoltID>,
-        extra_plugin_paths: Vec<PathBuf>,
-        plugin_configurations: HashMap<String, HashMap<String, serde_json::Value>>,
+
+        language_server_configurations: HashMap<
+            String,
+            HashMap<String, serde_json::Value>,
+        >,
     ) {
         self.notification(ProxyNotification::Initialize {
             workspace,
-            disabled_volts,
-            extra_plugin_paths,
-            plugin_configurations,
+            language_server_configurations,
             window_id: 1,
             tab_id: 1,
         });
@@ -1239,13 +1201,6 @@ impl ProxyRpcHandler {
         );
     }
 
-    pub fn update_plugin_configs(
-        &self,
-        configs: HashMap<String, HashMap<String, serde_json::Value>>,
-    ) {
-        self.notification(ProxyNotification::UpdatePluginConfigs { configs });
-    }
-
     pub fn get_selection_range(
         &self,
         path: PathBuf,
@@ -1360,6 +1315,24 @@ impl Default for ProxyRpcHandler {
 mod connection_tests {
     use super::*;
     use std::time::Duration;
+
+    #[test]
+    fn removed_extension_commands_are_not_part_of_the_protocol() {
+        for method in [
+            "install_volt",
+            "remove_volt",
+            "reload_volt",
+            "disable_volt",
+            "enable_volt",
+            "update_plugin_configs",
+        ] {
+            let message = serde_json::json!({"method": method, "params": {}});
+            assert!(
+                serde_json::from_value::<ProxyNotification>(message).is_err(),
+                "{method}"
+            );
+        }
+    }
 
     #[test]
     fn timeout_removes_request_and_late_response_is_ignored() {

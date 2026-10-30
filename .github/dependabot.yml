@@ -18,18 +18,10 @@ updates:
         patterns:
           - "*"
         exclude-patterns:
-          - "wasmtime*"
-          - "wasi-common"
-          - "wasi-experimental-http-wasmtime"
           - "tracing*"
           - "strum*"
           - "tree-sitter"
           - "floem*"
-      wasmtime:
-        patterns:
-          - "wasmtime*"
-          - "wasi-common"
-          - "wasi-experimental-http-wasmtime"
       toml:
         patterns:
           - "toml"

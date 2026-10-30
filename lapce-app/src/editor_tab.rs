@@ -15,7 +15,6 @@ use floem::{
     },
     views::editor::id::EditorId,
 };
-use lapce_rpc::plugin::VoltID;
 use serde::{Deserialize, Serialize};
 
 use crate::{
@@ -28,10 +27,9 @@ use crate::{
     },
     id::{
         DiffEditorId, EditorTabId, KeymapId, SettingsId, SplitId,
-        ThemeColorSettingsId, VoltViewId,
+        ThemeColorSettingsId,
     },
     main_split::{Editors, MainSplitData},
-    plugin::PluginData,
     window_tab::WindowTabData,
 };
 
@@ -42,7 +40,6 @@ pub enum EditorTabChildInfo {
     Settings,
     ThemeColorSettings,
     Keymap,
-    Volt(VoltID),
 }
 
 impl EditorTabChildInfo {
@@ -67,18 +64,48 @@ impl EditorTabChildInfo {
                 EditorTabChild::ThemeColorSettings(ThemeColorSettingsId::next())
             }
             EditorTabChildInfo::Keymap => EditorTabChild::Keymap(KeymapId::next()),
-            EditorTabChildInfo::Volt(id) => {
-                EditorTabChild::Volt(VoltViewId::next(), id.to_owned())
-            }
         }
     }
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize)]
 pub struct EditorTabInfo {
     pub active: usize,
     pub is_focus: bool,
     pub children: Vec<EditorTabChildInfo>,
+}
+
+impl<'de> Deserialize<'de> for EditorTabInfo {
+    fn deserialize<D: serde::Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct StoredTab {
+            active: usize,
+            is_focus: bool,
+            children: Vec<serde_json::Value>,
+        }
+        let stored = StoredTab::deserialize(deserializer)?;
+        let mut children = Vec::new();
+        let mut active = 0;
+        for (index, child) in stored.children.into_iter().enumerate() {
+            // Drop retired extension details tabs without losing source tabs.
+            if child.get("Volt").is_some() {
+                continue;
+            }
+            if index < stored.active {
+                active += 1;
+            }
+            children.push(
+                serde_json::from_value(child).map_err(serde::de::Error::custom)?,
+            );
+        }
+        Ok(Self {
+            active: active.min(children.len().saturating_sub(1)),
+            is_focus: stored.is_focus,
+            children,
+        })
+    }
 }
 
 impl EditorTabInfo {
@@ -130,7 +157,6 @@ pub enum EditorTabChildSource {
     Settings,
     ThemeColorSettings,
     Keymap,
-    Volt(VoltID),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -140,7 +166,6 @@ pub enum EditorTabChild {
     Settings(SettingsId),
     ThemeColorSettings(ThemeColorSettingsId),
     Keymap(KeymapId),
-    Volt(VoltViewId, VoltID),
 }
 
 #[derive(PartialEq)]
@@ -161,7 +186,6 @@ impl EditorTabChild {
             EditorTabChild::Settings(id) => id.to_raw(),
             EditorTabChild::ThemeColorSettings(id) => id.to_raw(),
             EditorTabChild::Keymap(id) => id.to_raw(),
-            EditorTabChild::Volt(id, _) => id.to_raw(),
         }
     }
 
@@ -194,7 +218,6 @@ impl EditorTabChild {
                 EditorTabChildInfo::ThemeColorSettings
             }
             EditorTabChild::Keymap(_) => EditorTabChildInfo::Keymap,
-            EditorTabChild::Volt(_, id) => EditorTabChildInfo::Volt(id.to_owned()),
         }
     }
 
@@ -202,7 +225,6 @@ impl EditorTabChild {
         &self,
         editors: Editors,
         diff_editors: RwSignal<im::HashMap<DiffEditorId, DiffEditorData>>,
-        plugin: PluginData,
         config: ReadSignal<Arc<LapceConfig>>,
     ) -> Memo<EditorTabChildViewInfo> {
         match self.clone() {
@@ -366,30 +388,6 @@ impl EditorTabChild {
                     icon: config.ui_svg(LapceIcons::KEYBOARD),
                     color: Some(config.color(LapceColor::LAPCE_ICON_ACTIVE)),
                     name: "Keyboard Shortcuts".to_string(),
-                    path: None,
-                    confirmed: None,
-                    is_pristine: true,
-                }
-            }),
-            EditorTabChild::Volt(_, id) => create_memo(move |_| {
-                let config = config.get();
-                let display_name = plugin
-                    .installed
-                    .with(|volts| volts.get(&id).cloned())
-                    .map(|volt| volt.meta.with(|m| m.display_name.clone()))
-                    .or_else(|| {
-                        plugin.available.volts.with(|volts| {
-                            let volt = volts.get(&id);
-                            volt.map(|volt| {
-                                volt.info.with(|m| m.display_name.clone())
-                            })
-                        })
-                    })
-                    .unwrap_or_else(|| id.name.clone());
-                EditorTabChildViewInfo {
-                    icon: config.ui_svg(LapceIcons::EXTENSIONS),
-                    color: Some(config.color(LapceColor::LAPCE_ICON_ACTIVE)),
-                    name: display_name,
                     path: None,
                     confirmed: None,
                     is_pristine: true,

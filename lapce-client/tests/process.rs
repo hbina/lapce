@@ -36,12 +36,7 @@ fn remote_launcher_serves_real_backend_requests_over_stdio_queues() {
     let path = directory.path().join("remote source.rs");
     std::fs::write(&path, "remote🌍\n").unwrap();
     let rpc = ProxyRpcHandler::new();
-    rpc.initialize(
-        Some(directory.path().into()),
-        vec![],
-        vec![],
-        Default::default(),
-    );
+    rpc.initialize(Some(directory.path().into()), Default::default());
     let driver_rpc = rpc.clone();
     let worker = std::thread::spawn(move || {
         start_remote(

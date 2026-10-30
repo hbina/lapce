@@ -11,7 +11,6 @@ pub enum PanelKind {
     Terminal,
     FileExplorer,
     SourceControl,
-    Plugin,
     Search,
     Problem,
     Debug,
@@ -27,7 +26,7 @@ impl PanelKind {
             PanelKind::Terminal => LapceIcons::TERMINAL,
             PanelKind::FileExplorer => LapceIcons::FILE_EXPLORER,
             PanelKind::SourceControl => LapceIcons::SCM,
-            PanelKind::Plugin => LapceIcons::EXTENSIONS,
+
             PanelKind::Search => LapceIcons::SEARCH,
             PanelKind::Problem => LapceIcons::PROBLEM,
             PanelKind::Debug => LapceIcons::DEBUG,
@@ -53,7 +52,7 @@ impl PanelKind {
             PanelKind::Terminal => PanelPosition::BottomLeft,
             PanelKind::FileExplorer => PanelPosition::LeftTop,
             PanelKind::SourceControl => PanelPosition::LeftTop,
-            PanelKind::Plugin => PanelPosition::LeftTop,
+
             PanelKind::Search => PanelPosition::BottomLeft,
             PanelKind::Problem => PanelPosition::BottomLeft,
             PanelKind::Debug => PanelPosition::LeftTop,

@@ -21,18 +21,15 @@ interprocess       = { workspace = true }
 notify             = { workspace = true }
 parking_lot        = { workspace = true }
 regex              = { workspace = true }
-reqwest            = { workspace = true }
 serde              = { workspace = true }
 serde_json         = { workspace = true }
 tar                = { workspace = true }
-toml               = { workspace = true }
 tracing            = { workspace = true }
 tracing-log        = { workspace = true }
 url                = { workspace = true }
 zstd               = { workspace = true }
 
 lsp-types = { workspace = true }
-psp-types = { workspace = true }
 
 lapce-xi-rope     = { workspace = true }
 lapce-core        = { workspace = true }
@@ -42,7 +39,6 @@ floem-editor-core = { workspace = true }
 # proxy specific dependencies
 
 dyn-clone    = "1.0.16"
-walkdir      = "2.4.0"
 jsonrpc-lite = "0.6.0"
 polling      = "3.5.0"
 libc         = "0.2"
@@ -56,14 +52,7 @@ grep-searcher = "0.1"
 grep-matcher  = "0.1"
 grep-regex    = "0.1"
 
-# wasm
-wasmtime      = "14.0.0"
-wasmtime-wasi = "14.0.0"
-wasi-common   = "14.0.0"
 
-[dependencies.wasi-experimental-http-wasmtime]
-git = "https://github.com/lapce/wasi-experimental-http"
-# Keep the adapter compatible with our Wasmtime 14 runtime. Newer revisions
-# require runtime features from newer Wasmtime releases.
-rev = "21419eb785cb583ead180f25a9685fa16de7f326"
-# path = "../../wasi-experimental-http/crates/wasi-experimental-http-wasmtime"
+# rustix-openpty needs standard-library file descriptors for Alacritty PTYs.
+[target.'cfg(unix)'.dependencies]
+rustix = { version = "0.38", features = ["std"] }

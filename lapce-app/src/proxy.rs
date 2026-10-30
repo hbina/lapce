@@ -2,7 +2,6 @@
 
 use std::{
     collections::HashMap,
-    path::PathBuf,
     sync::{Arc, mpsc::Sender},
 };
 
@@ -13,7 +12,6 @@ use lapce_client::{
 };
 use lapce_rpc::{
     core::{CoreNotification, CoreRpcHandler},
-    plugin::VoltID,
     proxy::ProxyRpcHandler,
     terminal::TermId,
 };
@@ -38,9 +36,10 @@ pub fn new_proxy(
     workspace: Arc<LapceWorkspace>,
     backend_executable: &str,
     backend_socket: &str,
-    disabled_volts: Vec<VoltID>,
-    extra_plugin_paths: Vec<PathBuf>,
-    plugin_configurations: HashMap<String, HashMap<String, serde_json::Value>>,
+    language_server_configurations: HashMap<
+        String,
+        HashMap<String, serde_json::Value>,
+    >,
     term_tx: Sender<(TermId, TermEvent)>,
 ) -> ProxyData {
     let connection = ManagedBackend::connect(ConnectionOptions {
@@ -49,9 +48,7 @@ pub fn new_proxy(
             backend_executable,
             backend_socket,
         ),
-        disabled_volts,
-        extra_plugin_paths,
-        plugin_configurations,
+        language_server_configurations,
         ..Default::default()
     })
     .expect("start workspace backend");

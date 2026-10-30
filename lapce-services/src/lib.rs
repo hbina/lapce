@@ -2,5 +2,4 @@
 pub mod cli;
 pub mod environment;
 pub mod http;
-pub mod plugin;
 pub mod resource;

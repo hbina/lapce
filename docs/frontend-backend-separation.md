@@ -9,6 +9,14 @@ symbols, references, hover, diagnostics and read-only diffs. The editor/debug
 extraction notes below describe the earlier implementation and are historical
 where they conflict with this direction.
 
+The Volt/WASM extension system has been removed. The proxy now launches only
+configured native LSP servers; it has no Wasmtime/WASI dependencies, extension
+marketplace, package loader, or plugin process-execution protocol. Desktop
+extension UI and persistence have been removed, with saved-layout migration for
+retired panels and tabs. See [native language-server configuration](native-language-servers.md).
+Historical notes below about Volts, WASI, PSP, and extension management no longer
+describe supported functionality.
+
 The architectural goal is independence from the frontend UI library, not a
 requirement to run separate processes. Embedding the backend remains a valid
 deployment option if communication stays behind the queue/protocol boundary.

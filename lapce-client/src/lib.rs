@@ -10,7 +10,6 @@ use anyhow::{Context, Result};
 use lapce_proxy::dispatch::Dispatcher;
 use lapce_rpc::{
     core::{CoreHandler, CoreNotification, CoreRpcHandler},
-    plugin::VoltID,
     proxy::{ProxyRpcHandler, ProxyStatus},
 };
 
@@ -71,9 +70,8 @@ pub struct ConnectionOptions {
     pub local_backend: LocalBackend,
     /// An already installed remote executable; never downloaded or replaced.
     pub remote_backend_executable: Option<String>,
-    pub disabled_volts: Vec<VoltID>,
-    pub extra_plugin_paths: Vec<PathBuf>,
-    pub plugin_configurations: HashMap<String, HashMap<String, serde_json::Value>>,
+    pub language_server_configurations:
+        HashMap<String, HashMap<String, serde_json::Value>>,
 }
 
 pub struct BackendConnection {
@@ -102,9 +100,7 @@ impl BackendConnection {
         // immediately after connect must not overtake workspace setup.
         driver_proxy.initialize(
             options.workspace.path.clone(),
-            options.disabled_volts.clone(),
-            options.extra_plugin_paths.clone(),
-            options.plugin_configurations.clone(),
+            options.language_server_configurations.clone(),
         );
         let driver = match std::thread::Builder::new()
             .name("Lapce backend connection".into())

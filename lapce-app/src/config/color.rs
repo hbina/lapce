@@ -58,10 +58,6 @@ impl LapceColor {
     pub const LAPCE_REMOTE_CONNECTING: &'static str = "lapce.remote.connecting";
     pub const LAPCE_REMOTE_DISCONNECTED: &'static str = "lapce.remote.disconnected";
 
-    pub const LAPCE_PLUGIN_NAME: &'static str = "lapce.plugin.name";
-    pub const LAPCE_PLUGIN_DESCRIPTION: &'static str = "lapce.plugin.description";
-    pub const LAPCE_PLUGIN_AUTHOR: &'static str = "lapce.plugin.author";
-
     pub const EDITOR_BACKGROUND: &'static str = "editor.background";
     pub const EDITOR_FOREGROUND: &'static str = "editor.foreground";
     pub const EDITOR_DIM: &'static str = "editor.dim";

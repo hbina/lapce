@@ -26,7 +26,7 @@ fn managed_replacement_restores_live_definition_navigation() {
     let backend = ManagedBackend::connect(ConnectionOptions {
         workspace: LapceWorkspace { path: Some(directory.path().into()), ..Default::default() },
         local_backend: LocalBackend::Process { executable: std::env::var_os("LAPCE_TEST_PROXY").expect("set LAPCE_TEST_PROXY").into() },
-        plugin_configurations: HashMap::from([("lapce-native-lsp".into(), HashMap::from([("servers".into(), serde_json::json!([{
+        language_server_configurations: HashMap::from([("lapce-native-lsp".into(), HashMap::from([("servers".into(), serde_json::json!([{
             "language": "rust", "executable": std::path::PathBuf::from(std::env::var_os("LAPCE_TEST_LSP").expect("set LAPCE_TEST_LSP")),
             "options": { "cargo": { "buildScripts": { "enable": false } }, "procMacro": { "enable": false } }
         }]))]))]),
@@ -111,7 +111,7 @@ fn real_language_server_provides_read_only_navigation_and_diagnostics() {
     let host = SharedBackend::connect(ConnectionOptions {
         workspace: LapceWorkspace { path: Some(directory.path().into()), ..Default::default() },
         local_backend: LocalBackend::Process { executable: proxy.into() },
-        plugin_configurations: HashMap::from([("lapce-native-lsp".into(), HashMap::from([("servers".into(), serde_json::json!([{
+        language_server_configurations: HashMap::from([("lapce-native-lsp".into(), HashMap::from([("servers".into(), serde_json::json!([{
             "language": "rust", "executable": std::path::PathBuf::from(lsp),
             "options": { "cargo": { "buildScripts": { "enable": false } }, "procMacro": { "enable": false } }
         }]))]))]),

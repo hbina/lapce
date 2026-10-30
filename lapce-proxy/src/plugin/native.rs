@@ -1,6 +1,5 @@
 //! Native language-server configuration owned by the backend, independent of a UI.
 use super::{PluginCatalogRpcHandler, lsp::LspClient};
-use lapce_rpc::plugin::VoltID;
 use lsp_types::{DocumentFilter, Url};
 use serde::Deserialize;
 use serde_json::Value;
@@ -45,14 +44,7 @@ pub(super) fn start(
                 pattern: None,
             }],
             workspace.clone(),
-            VoltID {
-                author: "lapce".into(),
-                name: format!("native-{}", server.language),
-            },
             format!("Native {} language server", server.language),
-            None,
-            None,
-            workspace.clone(),
             uri,
             server.arguments,
             server.options,

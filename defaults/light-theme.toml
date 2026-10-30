@@ -117,9 +117,6 @@ dim-text = "#A0A1A7"
 "lapce.remote.connecting" = "#C18401"
 "lapce.remote.disconnected" = "#E45649"
 
-"lapce.plugin.name" = "#444444"
-"lapce.plugin.description" = "$text"
-"lapce.plugin.author" = "#707070"
 
 "terminal.cursor" = "$text"
 "terminal.foreground" = "$text"
