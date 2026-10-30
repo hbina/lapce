@@ -32,12 +32,12 @@ cd ~/lapce
 ```
 
 ```sh
-cargo install --path . --bin lapce --profile release-lto --locked
+cargo install --path . --bins --profile release-lto --locked
 ```
 
 > If you use a different distribution, and are having trouble finding appropriate dependencies, let us know in an issue!
 
-Once Lapce is compiled, the executable will be available in `$HOME/.cargo/bin/lapce` and should be available in `PATH` automatically.
+Once Lapce is compiled, `lapce-floem`, `lapce-iced` and `lapce-proxy` will be available in `$HOME/.cargo/bin`, which should be in `PATH` automatically.
 
 ## Building using Docker or Podman
 

@@ -124,14 +124,14 @@ env
 
 xx-cargo build \
   --frozen \
-  --package lapce-app \
+  --package lapce --bin lapce-floem \
   --profile release-lto \
   --no-default-features
 
-xx-verify "${CARGO_TARGET_DIR}"/"$(xx-cargo --print-target-triple)"/release-lto/lapce
+xx-verify "${CARGO_TARGET_DIR}"/"$(xx-cargo --print-target-triple)"/release-lto/lapce-floem
 
 mkdir -p /target
-mv -v "${CARGO_TARGET_DIR}"/"$(xx-cargo --print-target-triple)"/release-lto/lapce /target/
+mv -v "${CARGO_TARGET_DIR}"/"$(xx-cargo --print-target-triple)"/release-lto/lapce-floem /target/
 
 cargo pkgid | cut -d'#' -f2 | cut -d'@' -f2 | cut -d':' -f2 | tee /target/lapce.version
 EOF
@@ -140,10 +140,10 @@ FROM build-base AS dev
 COPY . ./dev
 
 FROM scratch AS binary
-COPY --from=build /target/lapce .
+COPY --from=build /target/lapce-floem .
 
 FROM scratch AS cross-binary
-COPY --from=build /target/lapce .
+COPY --from=build /target/lapce-floem .
 
 FROM build AS package-prepare
 WORKDIR /output
@@ -161,7 +161,7 @@ cp '/source/extra/linux/dev.lapce.lapce.desktop' './usr/share/applications/dev.l
 cp '/source/extra/linux/dev.lapce.lapce.metainfo.xml' './usr/share/metainfo/dev.lapce.lapce.metainfo.xml'
 cp '/source/extra/images/logo.png' './usr/share/pixmaps/dev.lapce.lapce.png'
 
-mv '/target/lapce' './usr/bin/'
+mv '/target/lapce-floem' './usr/bin/'
 
 if [[ "${PACKAGE_NAME}" == "lapce" ]]; then
   conflicts="lapce-nightly"
@@ -196,7 +196,7 @@ cat <<- EOL > debian/control
 	Source: https://lapce.dev
 EOL
 
-depends=$(dpkg-shlibdeps -O -e usr/bin/lapce)
+depends=$(dpkg-shlibdeps -O -e usr/bin/lapce-floem)
 depends=$(echo "${depends}" | sed 's/shlibs:Depends=//')
 echo "Depends: ${depends}" >> debian/control
 mv debian DEBIAN

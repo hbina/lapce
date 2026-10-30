@@ -218,7 +218,8 @@ fn byte_offset(content: &str, line: usize, column: usize) -> usize {
     }
     start + column
 }
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+/// Launch the read-only iced frontend using command-line arguments.
+pub fn launch() -> Result<(), Box<dyn std::error::Error>> {
     if std::env::args_os()
         .skip(1)
         .any(|arg| arg == "--help" || arg == "-h")

@@ -5,7 +5,7 @@ from pathlib import Path
 from PIL import Image
 parser = argparse.ArgumentParser(description="Linux X11 GUI process-mode smoke test; requires Pillow, xwininfo, xprop, xwd and libXtst. Captures need visual review.")
 repository = Path(__file__).resolve().parents[1]
-parser.add_argument('--lapce', type=Path, default=repository/'target/ci/lapce')
+parser.add_argument('--lapce', type=Path, default=repository/'target/ci/lapce-floem')
 parser.add_argument('--proxy', type=Path, default=repository/'target/ci/lapce-proxy')
 parser.add_argument('--output-directory', type=Path)
 parser.add_argument('--lsp', type=Path, help='Optional rust-analyzer executable for live GUI definition navigation')

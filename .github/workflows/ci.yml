@@ -8,6 +8,7 @@ on:
       - Cargo.toml
       - Cargo.lock
       - lapce-**
+      - src/**
       - .github/workflows/ci.yml
       - scripts/**
   workflow_dispatch:
@@ -74,7 +75,7 @@ jobs:
         env:
           LAPCE_TEST_PROXY: ${{ github.workspace }}/target/ci/lapce-proxy
         run: |
-          cargo build --profile ci --frozen -p lapce-iced
+          cargo build --profile ci --frozen --bin lapce-iced
           LAPCE_TEST_LSP="$(rustup which rust-analyzer)" cargo test --profile ci --frozen -p lapce-iced -- --include-ignored
 
       - name: Test separate backend process

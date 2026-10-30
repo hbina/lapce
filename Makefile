@@ -9,7 +9,8 @@ ubuntu-deps:
 binary:
 	cargo build --profile release-lto
 install: binary
-	install -Dm755 target/release-lto/lapce $(DESTDIR)$(PREFIX)/bin/lapce
+	install -Dm755 target/release-lto/lapce-floem $(DESTDIR)$(PREFIX)/bin/lapce-floem
+	install -Dm755 target/release-lto/lapce-iced $(DESTDIR)$(PREFIX)/bin/lapce-iced
 	install -Dm755 target/release-lto/lapce-proxy $(DESTDIR)$(PREFIX)/bin/lapce-proxy
 clean:
 	cargo clean

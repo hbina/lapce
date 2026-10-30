@@ -5,19 +5,24 @@ authors      = { workspace = true }
 edition      = { workspace = true }
 license      = { workspace = true }
 rust-version = { workspace = true }
-default-run  = "lapce"
+default-run  = "lapce-floem"
 
 [dependencies]
 lapce-app   = { path = "./lapce-app" }
+lapce-iced  = { path = "./lapce-iced" }
 lapce-proxy = { path = "./lapce-proxy" }
 
 [[bin]]
-name = "lapce"
-path = "lapce-app/src/bin/lapce.rs"
+name = "lapce-floem"
+path = "src/bin/lapce-floem.rs"
+
+[[bin]]
+name = "lapce-iced"
+path = "src/bin/lapce-iced.rs"
 
 [[bin]]
 name = "lapce-proxy"
-path = "lapce-proxy/src/bin/lapce-proxy.rs"
+path = "src/bin/lapce-proxy.rs"
 
 [workspace]
 members = ["lapce-app", "lapce-proxy", "lapce-rpc", "lapce-core", "lapce-client", "lapce-engine", "lapce-services", "lapce-iced"]
@@ -137,7 +142,7 @@ codegen-units = 1
 # See https://doc.rust-lang.org/cargo/reference/profiles.html
 # To use this profile:
 #   cargo build --profile fastdev
-#   cargo run --profile fastdev --bin lapce
+#   cargo run --profile fastdev --bin lapce-floem
 [profile.fastdev.package."*"]
 opt-level = 3
 

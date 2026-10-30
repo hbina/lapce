@@ -346,7 +346,7 @@ supports `show`, `open <path>`, `search <pattern>`, `symbols`,
 proxy process and contains no Floem imports or edit/save/resource commands.
 
 ```sh
-cargo build -p lapce-proxy --profile ci
+cargo build --bin lapce-proxy --profile ci
 cargo run -p lapce-engine --profile ci --example terminal -- \
   "$PWD/target/ci/lapce-proxy" /absolute/path/to/file
 ```
@@ -978,7 +978,7 @@ The desktop now has an optional `embedded-backend` feature (enabled in its defau
 
 Connection startup failures now emit a shared error message event, including the failed executable path for local processes, before reporting disconnection. Terminal event handling displays these messages. A process-mode integration test without the embedded backend verifies missing-executable failure, pending/future request release, disconnected status and clean worker shutdown.
 
-Real process-mode integration now has a repeatable test and an Ubuntu CI gate. Build `cargo build --profile ci -p lapce-proxy --bin lapce-proxy`, then run `LAPCE_TEST_PROXY=/absolute/path/to/target/ci/lapce-proxy cargo test --profile ci -p lapce-client --no-default-features --test process -- --include-ignored`. Both startup-failure and success-path tests passed locally. Success covers initialization, Unicode file opening, read-only metadata, directory listing, workspace search, rejected saving, unchanged disk content and worker shutdown. The success test is explicitly ignored for ordinary runs that have no separately built proxy; CI supplies the executable and includes it.
+Real process-mode integration now has a repeatable test and an Ubuntu CI gate. Build `cargo build --profile ci --bin lapce-proxy`, then run `LAPCE_TEST_PROXY=/absolute/path/to/target/ci/lapce-proxy cargo test --profile ci -p lapce-client --no-default-features --test process -- --include-ignored`. Both startup-failure and success-path tests passed locally. Success covers initialization, Unicode file opening, read-only metadata, directory listing, workspace search, rejected saving, unchanged disk content and worker shutdown. The success test is explicitly ignored for ordinary runs that have no separately built proxy; CI supplies the executable and includes it.
 
 The architecture gate also supports `python3 scripts/check-architecture.py --resolved`, which inspects Cargo's normal/build feature graph for process-only client and desktop builds and rejects proxy/Wasmtime dependencies. It passed locally and is included in Ubuntu CI after dependency fetching/building. The current remaining-work list was updated to reflect the user's always-read-only scope rather than obsolete editing/debug extraction tasks.
 

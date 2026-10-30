@@ -63,4 +63,7 @@ wasi-common   = "14.0.0"
 
 [dependencies.wasi-experimental-http-wasmtime]
 git = "https://github.com/lapce/wasi-experimental-http"
+# Keep the adapter compatible with our Wasmtime 14 runtime. Newer revisions
+# require runtime features from newer Wasmtime releases.
+rev = "21419eb785cb583ead180f25a9685fa16de7f326"
 # path = "../../wasi-experimental-http/crates/wasi-experimental-http-wasmtime"

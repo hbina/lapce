@@ -43,10 +43,22 @@ the code browser. Search and command inputs remain editable.
 This fork targets Linux. Build it from this checkout; upstream release binaries do not contain these changes.
 If you'd like to compile from source, you can find the [guide](docs/building-from-source.md).
 
-An additional [iced frontend](lapce-iced/README.md) exercises the shared backend
-and workspace engine with another UI library. Build it with
-`cargo build --profile ci -p lapce-iced -p lapce-proxy`, then run
-`target/ci/lapce-iced /path/to/workspace`.
+The root `lapce` package provides three executables:
+
+- `lapce-floem`: the main Floem desktop frontend (the default for `cargo run`).
+- `lapce-iced`: the additional [iced frontend](lapce-iced/README.md).
+- `lapce-proxy`: the backend process used by independent frontends.
+
+Build all three, then run either frontend:
+
+```sh
+cargo build --profile ci
+cargo run --profile ci --bin lapce-floem -- /path/to/workspace
+cargo run --profile ci --bin lapce-iced -- /path/to/workspace
+```
+
+Frontend implementations remain separate workspace library crates; select the
+executable from the root package with `--bin`, without a `-p` option.
 
 ## Contributing
 

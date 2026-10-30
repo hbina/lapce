@@ -16,6 +16,14 @@ metadata = json.loads(subprocess.check_output(
 ))
 packages = {package["name"]: package for package in metadata["packages"]}
 
+root_binaries = {target["name"] for target in packages["lapce"]["targets"]
+                 if "bin" in target["kind"]}
+assert root_binaries == {"lapce-floem", "lapce-iced", "lapce-proxy"}, \
+    f"Unexpected root executables: {sorted(root_binaries)}"
+for name in ("lapce-app", "lapce-iced", "lapce-proxy"):
+    assert not any("bin" in target["kind"] for target in packages[name]["targets"]), \
+        f"{name} must expose its executable through the root lapce package"
+
 def dependencies(name):
     return [dependency for dependency in packages[name]["dependencies"]
             if dependency["kind"] != "dev"]

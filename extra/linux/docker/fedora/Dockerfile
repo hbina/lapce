@@ -140,11 +140,11 @@ export RUSTFLAGS="-C linker=clang -C link-arg=-fuse-ld=/usr/bin/ld.lld"
 export PKG_CONFIG="$(xx-clang --print-prog-name=pkg-config)"
 rustup target add "$(xx-cargo --print-target-triple)"
 export RELEASE_TAG_NAME="${RELEASE_TAG_NAME}"
-xx-cargo build --profile release-lto --bin lapce --frozen
-xx-verify "${CARGO_TARGET_DIR}"/"$(xx-cargo --print-target-triple)"/release-lto/lapce
+xx-cargo build --profile release-lto --bin lapce-floem --frozen
+xx-verify "${CARGO_TARGET_DIR}"/"$(xx-cargo --print-target-triple)"/release-lto/lapce-floem
 
 %install
-install -Dm755 "${CARGO_TARGET_DIR}"/"$(xx-cargo --print-target-triple)"/release-lto/lapce %{buildroot}%{_bindir}/lapce
+install -Dm755 "${CARGO_TARGET_DIR}"/"$(xx-cargo --print-target-triple)"/release-lto/lapce-floem %{buildroot}%{_bindir}/lapce-floem
 install -Dm644 extra/linux/dev.lapce.lapce.desktop %{buildroot}/usr/share/applications/dev.lapce.lapce.desktop
 install -Dm644 extra/linux/dev.lapce.lapce.metainfo.xml %{buildroot}/usr/share/metainfo/dev.lapce.lapce.metainfo.xml
 install -Dm644 extra/images/logo.png %{buildroot}/usr/share/pixmaps/dev.lapce.lapce.png
@@ -152,7 +152,7 @@ install -Dm644 extra/images/logo.png %{buildroot}/usr/share/pixmaps/dev.lapce.la
 %files
 %license LICENSE*
 %doc *.md
-%{_bindir}/lapce
+%{_bindir}/lapce-floem
 /usr/share/applications/dev.lapce.lapce.desktop
 /usr/share/metainfo/dev.lapce.lapce.metainfo.xml
 /usr/share/pixmaps/dev.lapce.lapce.png

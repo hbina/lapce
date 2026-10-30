@@ -9,12 +9,12 @@ GenericName=Code Editor
 StartupWMClass=lapce
 
 Icon=dev.lapce.lapce
-Exec=lapce %F
+Exec=lapce-floem %F
 Terminal=false
 MimeType=text/plain;inode/directory;
 Actions=new-window;
 
 [Desktop Action new-window]
 Name=New Window
-Exec=lapce --new %F
+Exec=lapce-floem --new %F
 Icon=dev.lapce.lapce

@@ -19,10 +19,10 @@ It is designed with Rope Science from the Xi-Editor, enabling lightning-fast com
 cargo fetch --locked
 
 %build
-cargo build --profile release-lto --package lapce-app --frozen
+cargo build --profile release-lto --package lapce --bin lapce-floem --frozen
 
 %install
-install -Dm755 target/release-lto/lapce %{buildroot}%{_bindir}/lapce
+install -Dm755 target/release-lto/lapce-floem %{buildroot}%{_bindir}/lapce-floem
 install -Dm644 extra/linux/dev.lapce.lapce.desktop %{buildroot}/usr/share/applications/dev.lapce.lapce.desktop
 install -Dm644 extra/linux/dev.lapce.lapce.metainfo.xml %{buildroot}/usr/share/metainfo/dev.lapce.lapce.metainfo.xml
 install -Dm644 extra/images/logo.png %{buildroot}/usr/share/pixmaps/dev.lapce.lapce.png
@@ -30,7 +30,7 @@ install -Dm644 extra/images/logo.png %{buildroot}/usr/share/pixmaps/dev.lapce.la
 %files
 %license LICENSE*
 %doc *.md
-%{_bindir}/lapce
+%{_bindir}/lapce-floem
 /usr/share/applications/dev.lapce.lapce.desktop
 /usr/share/metainfo/dev.lapce.lapce.metainfo.xml
 /usr/share/pixmaps/dev.lapce.lapce.png

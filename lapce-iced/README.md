@@ -8,7 +8,7 @@ thread; bounded channels carry UI commands and presentation snapshots.
 Build the frontend and backend:
 
 ```sh
-cargo build --profile ci -p lapce-iced -p lapce-proxy
+cargo build --profile ci --bin lapce-iced --bin lapce-proxy
 target/ci/lapce-iced /absolute/path/to/workspace
 ```
 
