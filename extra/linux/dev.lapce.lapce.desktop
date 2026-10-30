@@ -16,5 +16,5 @@ Actions=new-window;
 
 [Desktop Action new-window]
 Name=New Window
-Exec=lapce-floem --new %F
+Exec=lapce-floem %F
 Icon=dev.lapce.lapce

@@ -16,11 +16,7 @@ pub struct Options {
 }
 impl Options {
     pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Self, String> {
-        let mut backend = LocalBackend::Process {
-            executable: std::env::current_exe()
-                .map_err(|e| e.to_string())?
-                .with_file_name("lapce-proxy"),
-        };
+        let mut backend = LocalBackend::default();
         let mut path = None;
         let mut lsp = None;
         while let Some(arg) = args.next() {
@@ -36,7 +32,7 @@ impl Options {
                 } else {
                     LocalBackend::Process { executable: value }
                 };
-            } else if arg == "--help" || path.is_some() {
+            } else if arg.to_string_lossy().starts_with('-') || path.is_some() {
                 return Err("Usage: lapce-iced [--proxy EXECUTABLE | --socket SOCKET] [--lsp RUST_ANALYZER] [FILE_OR_DIRECTORY]".into());
             } else {
                 path = Some(PathBuf::from(arg));
@@ -97,11 +93,14 @@ pub fn spawn(
 ) {
     let (commands, input) = mpsc::sync_channel(16);
     let (output, events) = mpsc::sync_channel(4);
-    let thread = std::thread::spawn(move || {
-        if let Err(error) = run(options, input, &output) {
-            let _ = output.send(Err(error));
-        }
-    });
+    let thread = std::thread::Builder::new()
+        .name("Lapce iced session".into())
+        .spawn(move || {
+            if let Err(error) = run(options, input, &output) {
+                let _ = output.send(Err(error));
+            }
+        })
+        .expect("start iced session worker");
     (commands, events, thread)
 }
 fn run(
@@ -388,6 +387,26 @@ mod tests {
     use super::*;
     use std::time::Instant;
 
+    #[test]
+    fn startup_selects_embedded_or_explicit_external_backend() {
+        let options = Options::parse(std::iter::empty()).unwrap();
+        #[cfg(feature = "embedded-backend")]
+        assert!(matches!(options.backend, LocalBackend::Embedded));
+        #[cfg(not(feature = "embedded-backend"))]
+        assert!(matches!(options.backend, LocalBackend::Process { .. }));
+        let parse =
+            |args: &[&str]| Options::parse(args.iter().map(OsString::from)).unwrap();
+        assert!(
+            matches!(parse(&["--proxy", "/tmp/lapce-proxy"]).backend, LocalBackend::Process { executable } if executable == PathBuf::from("/tmp/lapce-proxy"))
+        );
+        assert!(
+            matches!(parse(&["--socket", "/tmp/backend.sock"]).backend, LocalBackend::SharedSocket { path } if path == PathBuf::from("/tmp/backend.sock"))
+        );
+        for flag in ["--wait", "--new", "--reuse-window"] {
+            assert!(Options::parse([OsString::from(flag)].into_iter()).is_err());
+        }
+    }
+
     fn receive_until(
         events: &mpsc::Receiver<Result<Snapshot, String>>,
         mut predicate: impl FnMut(&Snapshot) -> bool,
@@ -407,6 +426,20 @@ mod tests {
     #[test]
     #[ignore = "requires LAPCE_TEST_PROXY; optionally LAPCE_TEST_LSP for live navigation"]
     fn real_backend_open_search_reload_and_close() {
+        exercise_backend(LocalBackend::Process {
+            executable: std::env::var_os("LAPCE_TEST_PROXY")
+                .expect("set LAPCE_TEST_PROXY")
+                .into(),
+        });
+    }
+
+    #[test]
+    #[cfg(feature = "embedded-backend")]
+    fn embedded_backend_open_search_reload_and_close() {
+        exercise_backend(LocalBackend::Embedded);
+    }
+
+    fn exercise_backend(backend: LocalBackend) {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("source 🌍.rs");
         let original = "pub fn answer() -> u32 { 42 }\npub fn caller() -> u32 { answer() }\n// 🌍\n";
@@ -415,11 +448,7 @@ mod tests {
         let lsp = std::env::var_os("LAPCE_TEST_LSP").map(PathBuf::from);
         let (commands, events, thread) = spawn(Options {
             path: path.clone(),
-            backend: LocalBackend::Process {
-                executable: std::env::var_os("LAPCE_TEST_PROXY")
-                    .expect("set LAPCE_TEST_PROXY")
-                    .into(),
-            },
+            backend,
             lsp: lsp.clone(),
         });
         let loaded = receive_until(&events, |snapshot| snapshot.content == original);

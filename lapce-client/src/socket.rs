@@ -81,7 +81,16 @@ pub fn run_client(
     core: CoreRpcHandler,
     proxy: ProxyRpcHandler,
 ) -> Result<()> {
-    let stream = UnixStream::connect(path)?;
+    tracing::info!(socket = %path.display(), "Connecting to external backend");
+    run_stream(UnixStream::connect(path)?, core, proxy)
+}
+
+/// Run the same framed protocol over a connected local pipe or named socket.
+pub fn run_stream(
+    stream: UnixStream,
+    core: CoreRpcHandler,
+    proxy: ProxyRpcHandler,
+) -> Result<()> {
     let writer_stream = stream.try_clone()?;
     let shutdown_stream = stream.try_clone()?;
     let writer_proxy = proxy.clone();

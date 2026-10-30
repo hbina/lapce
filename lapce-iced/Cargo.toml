@@ -9,9 +9,14 @@ rust-version = { workspace = true }
 iced = { version = "0.14", default-features = false, features = ["tiny-skia", "x11", "wayland", "tokio"] }
 lapce-client = { workspace = true }
 lapce-engine = { workspace = true }
+lapce-services = { workspace = true }
 lapce-rpc = { workspace = true }
 serde_json = { workspace = true }
 lsp-types = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+
+[features]
+default = ["embedded-backend"]
+embedded-backend = ["lapce-client/embedded-backend"]

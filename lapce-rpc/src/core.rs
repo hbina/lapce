@@ -20,7 +20,6 @@ use crate::{
     dap_types::{
         self, DapId, RunDebugConfig, Scope, StackFrame, Stopped, ThreadId, Variable,
     },
-    file::PathObject,
     plugin::PluginId,
     proxy::ProxyStatus,
     source_control::DiffInfo,
@@ -62,9 +61,7 @@ pub enum CoreNotification {
         resp: SignatureHelp,
         plugin_id: PluginId,
     },
-    OpenPaths {
-        paths: Vec<PathObject>,
-    },
+
     WorkspaceFileChange,
     PublishDiagnostics {
         diagnostics: PublishDiagnosticsParams,

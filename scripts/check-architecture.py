@@ -56,6 +56,9 @@ client = packages["lapce-client"]
 assert not client["features"].get("default"), "Backend embedding must be opt-in"
 proxy = next(d for d in dependencies("lapce-client") if d["name"] == "lapce-proxy")
 assert proxy["optional"], "Client backend dependency must remain optional"
+for frontend in ("lapce-app", "lapce-iced"):
+    assert "embedded-backend" in packages[frontend]["features"].get("default", []), \
+        f"{frontend} must use an embedded backend by default"
 assert not (reachable("lapce-client") & {"lapce-app", "lapce-iced", "lapce-engine", "floem", "iced"}), \
     "Connection library must remain independent of frontends and engine"
 assert not (reachable("lapce-iced") & {"lapce-app", "floem"}), \

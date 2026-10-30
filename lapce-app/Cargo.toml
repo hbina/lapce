@@ -10,7 +10,6 @@ rust-version = { workspace = true }
 lapce-services = { workspace = true }
 alacritty_terminal = { workspace = true }
 anyhow             = { workspace = true }
-backtrace          = { workspace = true }
 chrono             = { workspace = true }
 clap               = { workspace = true }
 crossbeam-channel  = { workspace = true }
@@ -19,7 +18,6 @@ globset            = { workspace = true }
 im                 = { workspace = true }
 include_dir        = { workspace = true }
 indexmap           = { workspace = true }
-interprocess       = { workspace = true }
 itertools          = { workspace = true }
 lapce-engine       = { workspace = true }
 lapce-client       = { workspace = true, default-features = false }
@@ -47,7 +45,6 @@ toml_edit          = { workspace = true }
 tracing            = { workspace = true }
 tracing-log        = { workspace = true }
 tracing-subscriber = { workspace = true }
-tracing-appender   = { workspace = true }
 url                = { workspace = true }
 zstd               = { workspace = true }
 floem              = { workspace = true }

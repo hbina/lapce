@@ -120,10 +120,7 @@ impl ProxyHandler for Dispatcher {
                     self.core_rpc.home_dir(dirs.home_dir().into());
                 }
             }
-            OpenPaths { paths } => {
-                self.core_rpc
-                    .notification(CoreNotification::OpenPaths { paths });
-            }
+
             OpenFileChanged { path } => {
                 if path.exists() {
                     if let Some(buffer) = self.buffers.get(&path) {

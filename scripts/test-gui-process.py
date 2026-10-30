@@ -24,7 +24,7 @@ env = os.environ.copy()
 env.pop('WAYLAND_DISPLAY', None)
 env.update(XDG_CONFIG_HOME=str(root/'config'), XDG_DATA_HOME=str(root/'data'), XDG_CACHE_HOME=str(root/'cache'), WINIT_UNIX_BACKEND='x11')
 with (root/'gui-output.log').open('w') as log:
-    app = subprocess.Popen([str(args.lapce.resolve()), '--new', '--wait', str(root/'workspace'), str(root/'workspace/example.rs')], env=env, stdout=log, stderr=log)
+    app = subprocess.Popen([str(args.lapce.resolve()), str(root/'workspace'), str(root/'workspace/example.rs')], env=env, stdout=log, stderr=log)
     try:
         deadline = time.monotonic() + 20
         window = None

@@ -229,6 +229,7 @@ pub fn launch() -> Result<(), Box<dyn std::error::Error>> {
         );
         return Ok(());
     }
+    let (_reload, _guard) = lapce_services::logging::init("lapce-iced");
     let options = worker::Options::parse(std::env::args_os().skip(1))?;
     iced::application(
         move || Browser::new(options.clone()),

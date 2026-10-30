@@ -6,8 +6,6 @@
 use std::{collections::HashMap, path::PathBuf, process::Command, sync::mpsc};
 
 use anyhow::{Context, Result};
-#[cfg(feature = "embedded-backend")]
-use lapce_proxy::dispatch::Dispatcher;
 use lapce_rpc::{
     core::{CoreHandler, CoreNotification, CoreRpcHandler},
     proxy::{ProxyRpcHandler, ProxyStatus},
@@ -113,12 +111,10 @@ impl BackendConnection {
                         LocalBackend::Embedded => {
                             #[cfg(feature = "embedded-backend")]
                             {
-                                let mut dispatcher = Dispatcher::new(
+                                run_embedded(
                                     driver_core.clone(),
                                     driver_proxy.clone(),
-                                );
-                                driver_proxy.mainloop(&mut dispatcher);
-                                Ok(())
+                                )
                             }
                             #[cfg(not(feature = "embedded-backend"))]
                             {
@@ -212,6 +208,23 @@ impl BackendConnection {
             .map_err(|_| anyhow::anyhow!("event worker panicked"))?;
         Ok(())
     }
+}
+
+#[cfg(feature = "embedded-backend")]
+fn run_embedded(
+    driver_core: CoreRpcHandler,
+    driver_proxy: ProxyRpcHandler,
+) -> Result<()> {
+    let (frontend, backend) = std::os::unix::net::UnixStream::pair()?;
+    let worker = std::thread::Builder::new()
+        .name("Lapce backend".into())
+        .spawn(move || lapce_proxy::transport::serve_stream(backend))?;
+    let result =
+        socket::run_stream(frontend, driver_core.clone(), driver_proxy.clone());
+    let backend_result = worker
+        .join()
+        .map_err(|_| anyhow::anyhow!("embedded backend panicked"))?;
+    result.and(backend_result)
 }
 
 struct EventForwarder(mpsc::Sender<CoreNotification>);

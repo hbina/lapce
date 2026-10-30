@@ -78,6 +78,13 @@ jobs:
           cargo build --profile ci --frozen --bin lapce-iced
           LAPCE_TEST_LSP="$(rustup which rust-analyzer)" cargo test --profile ci --frozen -p lapce-iced -- --include-ignored
 
+      - name: Test foreground and embedded startup
+        run: |
+          cargo test --profile ci --frozen -p lapce-app --lib cli_tests
+          cargo test --profile ci --frozen -p lapce-proxy --lib
+          cargo test --profile ci --frozen -p lapce-services --test logging
+          cargo test --profile ci --frozen -p lapce-client --features embedded-backend --test process embedded_
+
       - name: Test separate backend process
         shell: bash
         env:

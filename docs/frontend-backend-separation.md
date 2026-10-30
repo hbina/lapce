@@ -17,6 +17,14 @@ retired panels and tabs. See [native language-server configuration](native-langu
 Historical notes below about Volts, WASI, PSP, and extension management no longer
 describe supported functionality.
 
+Both GUI frontends now stay in the launching process and default to a backend
+thread connected over a Unix socket pair. CLI detaching, `--wait`, `--new`, window
+reuse, and the old desktop-routing socket have been removed. Logging is initialized
+once per process, with one queued worker writing stderr and rotating files.
+Explicit process, shared-socket, and SSH backend transports remain supported.
+See [startup and logging](startup-and-logging.md). Historical startup notes below
+that describe detached launches or iced's process default no longer apply.
+
 The architectural goal is independence from the frontend UI library, not a
 requirement to run separate processes. Embedding the backend remains a valid
 deployment option if communication stays behind the queue/protocol boundary.

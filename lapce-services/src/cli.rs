@@ -1,12 +1,7 @@
 use std::path::PathBuf;
 
-use anyhow::{Error, Result, anyhow};
-use lapce_core::directory::Directory;
-use lapce_rpc::{
-    RpcMessage,
-    file::{LineCol, PathObject},
-    proxy::{ProxyMessage, ProxyNotification},
-};
+use anyhow::{Error, Result};
+use lapce_rpc::file::{LineCol, PathObject};
 
 #[derive(Default, Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum PathObjectType {
@@ -75,19 +70,6 @@ pub fn parse_file_line_column(path: &str) -> Result<PathObject, Error> {
         path,
         linecol,
     })
-}
-
-pub fn try_open_in_existing_process(paths: &[PathObject]) -> Result<()> {
-    let local_socket = Directory::local_socket()
-        .ok_or_else(|| anyhow!("can't get local socket folder"))?;
-    let mut socket =
-        interprocess::local_socket::LocalSocketStream::connect(local_socket)?;
-
-    let msg: ProxyMessage = RpcMessage::Notification(ProxyNotification::OpenPaths {
-        paths: paths.to_vec(),
-    });
-    lapce_rpc::stdio::write_msg(&mut socket, msg)?;
-    Ok(())
 }
 
 #[cfg(test)]

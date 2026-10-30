@@ -1800,10 +1800,6 @@ impl WindowTabData {
                 self.terminal.set_process_id(term_id, *process_id);
             }
 
-            CoreNotification::OpenPaths { paths } => {
-                self.open_paths(paths);
-            }
-
             CoreNotification::OpenFileChanged { path, content } => {
                 self.main_split.open_file_changed(path, content);
             }

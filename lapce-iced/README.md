@@ -2,7 +2,7 @@
 
 A Linux read-only code browser built with iced 0.14. It uses `lapce-client`
 and `lapce-engine::runtime::WorkspaceSession`, with no dependency on the Floem
-desktop or backend implementation. Blocking session operations run on a worker
+desktop. The backend is embedded by default through `lapce-client`. Blocking session operations run on a worker
 thread; bounded channels carry UI commands and presentation snapshots.
 
 Build the frontend and backend:
@@ -12,9 +12,10 @@ cargo build --profile ci --bin lapce-iced --bin lapce-proxy
 target/ci/lapce-iced /absolute/path/to/workspace
 ```
 
-An initial file can be supplied instead of a directory. The default backend is
-`lapce-proxy` beside the frontend executable. Use `--proxy /path/to/lapce-proxy`
-to select another executable.
+An initial file can be supplied instead of a directory. The default backend runs on a thread inside the frontend process and communicates
+over a connected Unix socket pair. Use `--proxy /path/to/lapce-proxy` to explicitly
+launch a separate backend process. Logs are visible on stderr; see
+[foreground startup and logging](../docs/startup-and-logging.md).
 
 Browse directories in the left pane, or enter a file path and press Open.
 Relative file paths resolve against the displayed directory. The workspace
@@ -44,7 +45,7 @@ target/ci/lapce-iced --socket /absolute/path/to/workspace.sock /path/to/workspac
 
 Start that host with `lapce-client/examples/shared_host.rs`; the terminal frontend
 can attach to the same socket. The host controls the workspace and language-server
-configuration in socket mode; `--lsp` configures a directly launched proxy only.
+configuration in socket mode; `--lsp` configures the embedded backend or an explicitly launched proxy.
 
 This first frontend has a single file pane, basic directory browsing and plain
 monospace text. It does not yet provide syntax highlighting, navigation history,

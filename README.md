@@ -47,7 +47,7 @@ The root `lapce` package provides three executables:
 
 - `lapce-floem`: the main Floem desktop frontend (the default for `cargo run`).
 - `lapce-iced`: the additional [iced frontend](lapce-iced/README.md).
-- `lapce-proxy`: the backend process used by independent frontends.
+- `lapce-proxy`: the optional standalone backend executable.
 
 Build all three, then run either frontend:
 
@@ -59,6 +59,10 @@ cargo run --profile ci --bin lapce-iced -- /path/to/workspace
 
 Frontend implementations remain separate workspace library crates; select the
 executable from the root package with `--bin`, without a `-p` option.
+
+Both frontends run in the foreground and use an embedded backend by default.
+Every invocation starts its own instance. Logs go to stderr and a rotating file;
+see [startup and logging](docs/startup-and-logging.md).
 
 Language support uses [native LSP server executables](docs/native-language-servers.md).
 Volt/WASM extensions and the extension marketplace have been removed.

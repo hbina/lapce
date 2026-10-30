@@ -5,27 +5,25 @@ pub mod cli;
 pub mod dispatch;
 pub mod plugin;
 pub mod terminal;
+#[cfg(unix)]
+pub mod transport;
 pub mod watcher;
 
 use std::{
     io::{BufReader, stdin, stdout},
-    process::exit,
     sync::Arc,
     thread,
 };
 
-use anyhow::{Result, anyhow};
 use clap::Parser;
 use dispatch::Dispatcher;
-use lapce_core::{directory::Directory, meta};
+use lapce_core::meta;
 use lapce_rpc::{
     RpcMessage,
     core::{CoreRpc, CoreRpcHandler},
-    file::PathObject,
-    proxy::{ProxyMessage, ProxyNotification, ProxyRpcHandler},
+    proxy::ProxyRpcHandler,
     stdio::stdio_transport,
 };
-use tracing::error;
 
 #[derive(Parser)]
 #[clap(name = "Lapce-proxy")]
@@ -34,27 +32,15 @@ struct Cli {
     #[clap(short, long, action, hide = true)]
     proxy: bool,
 
-    /// Disable desktop CLI routing for an independently launched backend session.
-    #[clap(long)]
+    /// Compatibility option; desktop CLI routing has been removed.
+    #[clap(long, hide = true)]
     no_cli_socket: bool,
-
-    /// Paths to file(s) and/or folder(s) to open.
-    /// When path is a file (that exists or not),
-    /// it accepts `path:line:column` syntax
-    /// to specify line and column at which it should open the file
-    #[clap(value_parser = cli::parse_file_line_column)]
-    #[clap(value_hint = clap::ValueHint::AnyPath)]
-    paths: Vec<PathObject>,
 }
 
 pub fn mainloop() {
-    let cli = Cli::parse();
-    if !cli.proxy {
-        if let Err(e) = cli::try_open_in_existing_process(&cli.paths) {
-            error!("failed to open path(s): {e}");
-        };
-        exit(1);
-    }
+    let _cli = Cli::parse();
+    let (_reload, _guard) = lapce_services::logging::init("lapce-proxy");
+
     let core_rpc = CoreRpcHandler::new();
     let proxy_rpc = ProxyRpcHandler::new();
     let mut dispatcher = Dispatcher::new(core_rpc.clone(), proxy_rpc.clone());
@@ -127,14 +113,6 @@ pub fn mainloop() {
         local_proxy_rpc.shutdown();
     });
 
-    if !cli.no_cli_socket {
-        let local_proxy_rpc = proxy_rpc.clone();
-        std::thread::spawn(move || {
-            if let Err(err) = listen_local_socket(local_proxy_rpc) {
-                tracing::error!("{:?}", err);
-            }
-        });
-    }
     if let Err(err) = register_lapce_path() {
         tracing::error!("{:?}", err);
     }
@@ -143,32 +121,5 @@ pub fn mainloop() {
 }
 
 pub use lapce_services::environment::register_lapce_path;
-
-fn listen_local_socket(proxy_rpc: ProxyRpcHandler) -> Result<()> {
-    let local_socket = Directory::local_socket()
-        .ok_or_else(|| anyhow!("can't get local socket folder"))?;
-    if let Err(err) = std::fs::remove_file(&local_socket) {
-        tracing::error!("{:?}", err);
-    }
-    let socket =
-        interprocess::local_socket::LocalSocketListener::bind(local_socket)?;
-    for stream in socket.incoming().flatten() {
-        let mut reader = BufReader::new(stream);
-        let proxy_rpc = proxy_rpc.clone();
-        thread::spawn(move || -> Result<()> {
-            loop {
-                let msg: Option<ProxyMessage> =
-                    lapce_rpc::stdio::read_msg(&mut reader)?;
-                if let Some(RpcMessage::Notification(
-                    ProxyNotification::OpenPaths { paths },
-                )) = msg
-                {
-                    proxy_rpc.notification(ProxyNotification::OpenPaths { paths });
-                }
-            }
-        });
-    }
-    Ok(())
-}
 
 pub use lapce_services::http::get_url;

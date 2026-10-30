@@ -26,7 +26,7 @@ use crate::{
     RequestId, RpcError, RpcMessage,
     buffer::BufferId,
     dap_types::{self, DapId, RunDebugConfig, SourceBreakpoint, ThreadId},
-    file::{DirectoryEntry, PathObject},
+    file::DirectoryEntry,
     file_line::FileLine,
     plugin::PluginId,
     source_control::FileDiff,
@@ -338,9 +338,7 @@ pub enum ProxyNotification {
     OpenFileChanged {
         path: PathBuf,
     },
-    OpenPaths {
-        paths: Vec<PathObject>,
-    },
+
     Shutdown {},
     Completion {
         request_id: usize,

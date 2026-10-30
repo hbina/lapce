@@ -231,13 +231,25 @@ fn missing_backend_reports_failure_and_releases_requests() {
 #[test]
 #[ignore = "requires a built lapce-proxy executable"]
 fn real_process_browses_workspace_and_enforces_read_only() {
+    let executable = std::env::var_os("LAPCE_TEST_PROXY")
+        .expect("set LAPCE_TEST_PROXY to the backend executable");
+    assert_workspace_browser(LocalBackend::Process {
+        executable: executable.into(),
+    });
+}
+
+#[test]
+#[cfg(feature = "embedded-backend")]
+fn embedded_pipe_browses_workspace_and_shuts_down() {
+    assert_workspace_browser(LocalBackend::Embedded);
+}
+
+fn assert_workspace_browser(backend: LocalBackend) {
     use lapce_client::workspace::LapceWorkspace;
     use lapce_rpc::{
         buffer::BufferId,
         proxy::{PathRequest, ProxyResponse},
     };
-    let executable = std::env::var_os("LAPCE_TEST_PROXY")
-        .expect("set LAPCE_TEST_PROXY to the backend executable");
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("source.rs");
     let text = "fn needle() {} // 🌍\n";
@@ -247,9 +259,7 @@ fn real_process_browses_workspace_and_enforces_read_only() {
             path: Some(directory.path().into()),
             ..Default::default()
         },
-        local_backend: LocalBackend::Process {
-            executable: executable.into(),
-        },
+        local_backend: backend,
         ..Default::default()
     })
     .unwrap();
@@ -284,10 +294,22 @@ fn real_process_browses_workspace_and_enforces_read_only() {
 #[test]
 #[ignore = "requires a built lapce-proxy executable"]
 fn managed_restart_preserves_frontend_endpoint_and_replaces_backend() {
-    use lapce_client::{managed::ManagedBackend, workspace::LapceWorkspace};
-    use lapce_rpc::{buffer::BufferId, proxy::ProxyResponse};
     let executable =
         std::env::var_os("LAPCE_TEST_PROXY").expect("set LAPCE_TEST_PROXY");
+    assert_managed_restart(LocalBackend::Process {
+        executable: executable.into(),
+    });
+}
+
+#[test]
+#[cfg(feature = "embedded-backend")]
+fn embedded_managed_restart_preserves_frontend_endpoint() {
+    assert_managed_restart(LocalBackend::Embedded);
+}
+
+fn assert_managed_restart(backend: LocalBackend) {
+    use lapce_client::{managed::ManagedBackend, workspace::LapceWorkspace};
+    use lapce_rpc::{buffer::BufferId, proxy::ProxyResponse};
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("source.rs");
     std::fs::write(&path, "before🌍").unwrap();
@@ -296,9 +318,7 @@ fn managed_restart_preserves_frontend_endpoint_and_replaces_backend() {
             path: Some(directory.path().into()),
             ..Default::default()
         },
-        local_backend: LocalBackend::Process {
-            executable: executable.into(),
-        },
+        local_backend: backend,
         ..Default::default()
     })
     .unwrap();
