@@ -17,8 +17,10 @@ over a connected Unix socket pair. Use `--proxy /path/to/lapce-proxy` to explici
 launch a separate backend process. Logs are visible on stderr; see
 [foreground startup and logging](../docs/startup-and-logging.md).
 
-Browse directories in the left pane, or enter a file path and press Open.
-Relative file paths resolve against the displayed directory. The workspace
+Expand or collapse folders in the left explorer tree; click a file to open it.
+Folders load on expansion, and multiple branches can stay open at once. The
+highlighted file is the active document. You can also enter a file path and press Open.
+Relative file paths resolve against the workspace root. The workspace
 search root remains the initial directory (or the initial file's parent).
 Select and navigate text in the code pane; text mutations are discarded.
 Search and path inputs remain editable. Search, definition and reference results

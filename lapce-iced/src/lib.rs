@@ -1,4 +1,5 @@
 //! Read-only iced adapter over the shared workspace engine.
+mod tree;
 mod worker;
 
 use iced::{
@@ -122,32 +123,12 @@ impl Browser {
         Task::none()
     }
     fn view(&self) -> Element<'_, Message> {
-        let mut files = column![
-            button("Parent directory").on_press(Message::Send(Command::List(
-                self.snapshot
-                    .directory
-                    .parent()
-                    .unwrap_or(&self.snapshot.directory)
-                    .to_path_buf()
-            )))
-        ]
-        .spacing(4);
-        for entry in &self.snapshot.entries {
-            let name = format!(
-                "{}{}",
-                entry.path.file_name().unwrap_or_default().to_string_lossy(),
-                if entry.is_dir { "/" } else { "" }
-            );
-            let command = if entry.is_dir {
-                Command::List(entry.path.clone())
-            } else {
-                Command::Open(entry.path.clone())
-            };
-            files = files.push(
-                button(text(name))
-                    .on_press(Message::Send(command))
-                    .width(Length::Fill),
-            );
+        let mut files = column![text("EXPLORER").size(12)].spacing(2);
+        if !self.snapshot.directory.as_os_str().is_empty() {
+            files = files.push(self.tree_row(&self.snapshot.directory, true, 0));
+        }
+        for (entry, depth) in self.snapshot.tree.rows(&self.snapshot.directory) {
+            files = files.push(self.tree_row(&entry.path, entry.is_dir, depth));
         }
         let mut open_files = row![].spacing(4);
         for path in &self.snapshot.open_files {
@@ -208,6 +189,50 @@ impl Browser {
         )
         .padding(12)
         .into()
+    }
+
+    fn tree_row<'a>(
+        &'a self,
+        path: &std::path::Path,
+        is_dir: bool,
+        depth: usize,
+    ) -> Element<'a, Message> {
+        let marker = if is_dir {
+            if self.snapshot.tree.is_expanded(path) {
+                "▾"
+            } else {
+                "▸"
+            }
+        } else {
+            " "
+        };
+        let name = path
+            .file_name()
+            .unwrap_or(path.as_os_str())
+            .to_string_lossy();
+        let command = if is_dir {
+            Command::ToggleDirectory(path.to_path_buf())
+        } else {
+            Command::Open(path.to_path_buf())
+        };
+        let selected = !is_dir && path == self.snapshot.path;
+        let entry =
+            button(row![text(marker).width(14), text(name.into_owned())].spacing(4))
+                .on_press(Message::Send(command))
+                .padding([4, 6])
+                .style(if selected {
+                    button::primary
+                } else {
+                    button::text
+                })
+                .width(Length::Fill);
+        container(entry)
+            .padding(iced::Padding {
+                left: (depth * 16) as f32,
+                ..Default::default()
+            })
+            .width(Length::Fill)
+            .into()
     }
 }
 impl Drop for Browser {

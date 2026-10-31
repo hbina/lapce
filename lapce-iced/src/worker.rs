@@ -1,3 +1,4 @@
+use crate::tree::DirectoryTree;
 use lapce_client::{
     BackendConnection, ConnectionOptions, LocalBackend, workspace::LapceWorkspace,
 };
@@ -5,7 +6,7 @@ use lapce_engine::{
     navigation::NavigationQuery,
     runtime::{RpcExecutor, WorkspaceSession},
 };
-use lapce_rpc::{file::DirectoryEntry, proxy::ProxyResponse};
+use lapce_rpc::proxy::ProxyResponse;
 use std::{ffi::OsString, path::PathBuf, sync::mpsc, time::Duration};
 
 #[derive(Clone)]
@@ -93,7 +94,7 @@ pub enum Navigation {
 pub enum Command {
     Open(PathBuf),
     Jump(PathBuf, u32),
-    List(PathBuf),
+    ToggleDirectory(PathBuf),
     Search(String),
     Navigate {
         kind: Navigation,
@@ -108,7 +109,7 @@ pub struct Snapshot {
     pub directory: PathBuf,
     pub content: String,
     pub revision: u64,
-    pub entries: Vec<DirectoryEntry>,
+    pub tree: DirectoryTree,
     pub open_files: Vec<PathBuf>,
     pub status: String,
     pub detail: String,
@@ -171,7 +172,9 @@ fn serve(
         directory: directory.clone(),
         ..Default::default()
     };
-    snapshot.entries = session.list_directory(directory)?;
+    snapshot
+        .tree
+        .expand(directory.clone(), session.list_directory(directory)?);
     let first = initial.first().cloned();
     for path in initial {
         open(&mut session, &mut snapshot, path)?;
@@ -284,9 +287,13 @@ fn execute(
             snapshot.jump =
                 Some((snapshot.jump.map_or(1, |(id, _)| id + 1), line as usize));
         }
-        Command::List(path) => {
-            snapshot.entries = session.list_directory(path.clone())?;
-            snapshot.directory = path;
+        Command::ToggleDirectory(path) => {
+            if snapshot.tree.is_expanded(&path) {
+                snapshot.tree.collapse(&path);
+            } else {
+                let entries = session.list_directory(path.clone())?;
+                snapshot.tree.expand(path, entries);
+            }
         }
         Command::Search(pattern) => {
             session.search_workspace(
@@ -522,6 +529,93 @@ mod tests {
                 return snapshot;
             }
         }
+    }
+
+    #[test]
+    #[cfg(feature = "embedded-backend")]
+    fn explorer_expands_siblings_and_preserves_nested_branches() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().to_path_buf();
+        let first = root.join("first");
+        let nested = first.join("nested");
+        let second = root.join("second");
+        let file = nested.join("source 🌍.rs");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir(&second).unwrap();
+        std::fs::write(&file, "nested content").unwrap();
+        let (commands, events, thread) = spawn(Options {
+            root: root.clone(),
+            files: vec![],
+            backend: LocalBackend::Embedded,
+            lsp: None,
+        });
+        let initial = receive_until(&events, |snapshot| snapshot.directory == root);
+        assert_eq!(initial.tree.rows(&root).len(), 2);
+        for folder in [&first, &nested, &second] {
+            commands
+                .send(Command::ToggleDirectory(folder.clone()))
+                .unwrap();
+            receive_until(&events, |snapshot| snapshot.tree.is_expanded(folder));
+        }
+        commands.send(Command::Open(file.clone())).unwrap();
+        let opened = receive_until(&events, |snapshot| snapshot.path == file);
+        assert_eq!(opened.content, "nested content");
+        assert_eq!(opened.directory, root);
+        assert!(opened.tree.is_expanded(&first));
+        assert!(opened.tree.is_expanded(&second));
+        assert!(
+            opened
+                .tree
+                .rows(&root)
+                .iter()
+                .any(|(entry, depth)| entry.path == file && *depth == 3)
+        );
+
+        commands
+            .send(Command::ToggleDirectory(first.clone()))
+            .unwrap();
+        let collapsed =
+            receive_until(&events, |snapshot| !snapshot.tree.is_expanded(&first));
+        assert_eq!(collapsed.tree.rows(&root).len(), 2);
+        assert_eq!(collapsed.path, file);
+        commands
+            .send(Command::ToggleDirectory(first.clone()))
+            .unwrap();
+        let reopened =
+            receive_until(&events, |snapshot| snapshot.tree.is_expanded(&first));
+        assert!(
+            reopened
+                .tree
+                .rows(&root)
+                .iter()
+                .any(|(entry, _)| entry.path == file)
+        );
+
+        // Refreshing a branch drops stale expansion state after a directory
+        // becomes a file, so its cached children cannot appear under that file.
+        commands
+            .send(Command::ToggleDirectory(first.clone()))
+            .unwrap();
+        receive_until(&events, |snapshot| !snapshot.tree.is_expanded(&first));
+        std::fs::remove_file(&file).unwrap();
+        std::fs::remove_dir(&nested).unwrap();
+        std::fs::write(&nested, "replacement").unwrap();
+        commands
+            .send(Command::ToggleDirectory(first.clone()))
+            .unwrap();
+        let refreshed =
+            receive_until(&events, |snapshot| snapshot.tree.is_expanded(&first));
+        assert!(!refreshed.tree.is_expanded(&nested));
+        assert!(
+            !refreshed
+                .tree
+                .rows(&root)
+                .iter()
+                .any(|(entry, _)| entry.path == file)
+        );
+        drop(commands);
+        drop(events);
+        thread.join().unwrap();
     }
 
     #[test]
