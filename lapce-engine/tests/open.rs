@@ -72,6 +72,7 @@ fn document() -> Document {
 }
 fn response(read_only: bool) -> Result<ProxyResponse, lapce_rpc::RpcError> {
     Ok(ProxyResponse::NewBufferResponse {
+        snapshot: Default::default(),
         content: "backend".into(),
         read_only,
         rev: 42,

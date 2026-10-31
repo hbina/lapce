@@ -46,6 +46,7 @@ struct FrontendSnapshot {
     text: lapce_xi_rope::Rope,
     local_rev: u64,
     backend_rev: u64,
+    snapshot: lapce_rpc::highlighting::TextSnapshot,
 }
 type FrontendSnapshots =
     std::collections::HashMap<(FrontendId, std::path::PathBuf), FrontendSnapshot>;
@@ -55,6 +56,12 @@ fn frontend_event(
     snapshots: &FrontendSnapshots,
     event: &CoreNotification,
 ) -> Option<CoreNotification> {
+    if let CoreNotification::PublishHighlights { highlights } = event {
+        let current = snapshots.get(&(peer, highlights.path.clone()))?;
+        if current.snapshot != highlights.snapshot {
+            return None;
+        }
+    }
     let mut event = event.clone();
     if let CoreNotification::PublishDiagnostics { diagnostics } = &mut event {
         if let (Some(version), Some(path)) = (
@@ -124,8 +131,12 @@ fn request(
             if response.is_err() && !already_owned {
                 let _ = leases.release(peer, &path, buffer_id);
             }
-            if let Ok(ProxyResponse::NewBufferResponse { content, rev, .. }) =
-                &response
+            if let Ok(ProxyResponse::NewBufferResponse {
+                content,
+                rev,
+                snapshot,
+                ..
+            }) = &response
             {
                 snapshots.insert(
                     (peer, path),
@@ -133,6 +144,7 @@ fn request(
                         text: lapce_xi_rope::Rope::from(content.as_str()),
                         local_rev: *rev,
                         backend_rev: *rev,
+                        snapshot: snapshot.clone(),
                     },
                 );
             }
@@ -148,6 +160,7 @@ fn request(
                     content,
                     read_only,
                     rev,
+                    snapshot,
                     ..
                 } => {
                     snapshots.insert(
@@ -156,6 +169,7 @@ fn request(
                             text: lapce_xi_rope::Rope::from(content.as_str()),
                             local_rev: rev,
                             backend_rev: rev,
+                            snapshot: snapshot.clone(),
                         },
                     );
                     Ok(ProxyResponse::BufferSnapshot {
@@ -164,6 +178,7 @@ fn request(
                         content,
                         read_only,
                         rev,
+                        snapshot,
                     })
                 }
                 _ => Err(error("Unexpected snapshot response")),
@@ -206,6 +221,7 @@ fn request(
             let ProxyResponse::BufferSnapshot {
                 content,
                 rev: mut backend_rev,
+                snapshot: mut identity,
                 ..
             } = call(ProxyRequest::GetBuffer { path: path.clone() })?
             else {
@@ -227,10 +243,12 @@ fn request(
                     delta,
                     rev: next,
                 })? {
-                    ProxyResponse::BufferUpdated { rev: accepted }
-                        if accepted == next =>
-                    {
+                    ProxyResponse::BufferUpdated {
+                        rev: accepted,
+                        snapshot,
+                    } if accepted == next => {
                         backend_rev = next;
+                        identity = snapshot;
                     }
                     _ => return Err(error("Unexpected backend update response")),
                 }
@@ -241,9 +259,13 @@ fn request(
                     text: candidate,
                     local_rev: rev,
                     backend_rev,
+                    snapshot: identity.clone(),
                 },
             );
-            Ok(ProxyResponse::BufferUpdated { rev })
+            Ok(ProxyResponse::BufferUpdated {
+                rev,
+                snapshot: identity,
+            })
         }
         ProxyRequest::CloseBuffer { buffer_id, path } => {
             let canonical =
@@ -276,6 +298,8 @@ fn request(
                 | ProxyRequest::GetDocumentSymbols { path }
                 | ProxyRequest::GetInlayHints { path }
                 | ProxyRequest::GetSemanticTokens { path }
+                | ProxyRequest::GetHighlightSnapshot { path }
+                | ProxyRequest::SetSyntaxLanguage { path, .. }
                 | ProxyRequest::LspFoldingRange { path } => Some(path),
                 _ => None,
             };
@@ -367,7 +391,7 @@ impl SharedBackend {
                         match peer.rpc.rx().try_recv() {
                             Ok(ProxyRpc::Request(id, query)) => {
                                 let updated_path = match &query {
-                                    ProxyRequest::UpdateBuffer { path, .. } => {
+                                    ProxyRequest::UpdateBuffer { path, .. } | ProxyRequest::NewBuffer { path, .. } => {
                                         Some(path.clone())
                                     }
                                     _ => None,
@@ -386,6 +410,12 @@ impl SharedBackend {
                                 if updated {
                                     if let Some(path) = updated_path {
                                         {
+                                            if let Ok(ProxyResponse::HighlightSnapshot { highlights }) = backend.proxy_rpc.request_timeout(
+                                                ProxyRequest::GetHighlightSnapshot { path: path.clone() }, Duration::from_secs(10)) {
+                                                if let Some(event) = frontend_event(peer.id, &snapshots, &CoreNotification::PublishHighlights { highlights }) {
+                                                    if peer.events.try_send(event).is_err() { departed.push(peer.id); }
+                                                }
+                                            }
                                             if let Some(event) = state
                                                 .diagnostics.values().find(|event| {
                                                     matches!(event, CoreNotification::PublishDiagnostics { diagnostics }
@@ -484,6 +514,7 @@ mod tests {
                 text: lapce_xi_rope::Rope::from("text"),
                 local_rev: 3,
                 backend_rev: 8,
+                snapshot: Default::default(),
             },
         )]);
         let event = |version| CoreNotification::PublishDiagnostics {

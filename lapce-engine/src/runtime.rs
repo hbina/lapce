@@ -71,6 +71,10 @@ pub struct WorkspaceSession<E> {
 
 pub enum SessionEvent {
     StaleBackend,
+    HighlightsChanged {
+        path: PathBuf,
+        accepted: bool,
+    },
     DocumentChanged {
         path: PathBuf,
         reloaded: bool,
@@ -263,6 +267,14 @@ impl<E: RequestExecutor> WorkspaceSession<E> {
     ) -> Result<SessionEvent, String> {
         use lapce_rpc::core::{CoreNotification, FileChanged};
         match event {
+            CoreNotification::PublishHighlights { highlights } => {
+                let path = highlights.path.clone();
+                let accepted =
+                    self.documents.files.get_mut(&path).is_some_and(|document| {
+                        document.accept_highlights(highlights)
+                    });
+                Ok(SessionEvent::HighlightsChanged { path, accepted })
+            }
             CoreNotification::UpdateTerminal { term_id, content } => {
                 if !self.terminals.contains_key(&term_id) {
                     return Ok(SessionEvent::Unhandled(
@@ -359,6 +371,7 @@ impl<E: RequestExecutor> WorkspaceSession<E> {
                         if let Some(delta) = delta {
                             self.synchronize_edits(&path, &[delta])?;
                             self.flush(&path)?;
+                            let _ = self.refresh_highlights(&path);
                         }
                         Ok(SessionEvent::DocumentChanged { path, reloaded })
                     }
@@ -390,7 +403,7 @@ impl<E: RequestExecutor> WorkspaceSession<E> {
         for (_, document) in self.documents.files.iter_mut() {
             document.backend_disconnected();
         }
-        paths
+        let results: Vec<_> = paths
             .into_iter()
             .map(|path| {
                 let document = self.documents.files.get_mut(&path).unwrap();
@@ -407,7 +420,18 @@ impl<E: RequestExecutor> WorkspaceSession<E> {
                 }
                 (path, result)
             })
-            .collect()
+            .collect();
+        for (path, result) in &results {
+            if result.is_ok()
+                && self
+                    .document(path)
+                    .and_then(|document| document.backend_snapshot.as_ref())
+                    .is_some_and(|snapshot| !snapshot.instance.is_empty())
+            {
+                let _ = self.refresh_highlights(path);
+            }
+        }
+        results
     }
 
     pub fn open(&mut self, path: PathBuf) -> Result<(), String> {
@@ -428,9 +452,40 @@ impl<E: RequestExecutor> WorkspaceSession<E> {
             use lapce_core::buffer::rope_text::RopeText;
             diagnostics.bind(document.buffer.text(), document.buffer.rev());
         }
-        self.documents.files.insert(path, document);
+        self.documents.files.insert(path.clone(), document);
+        if self
+            .documents
+            .files
+            .get(&path)
+            .and_then(|document| document.backend_snapshot.as_ref())
+            .is_some_and(|snapshot| !snapshot.instance.is_empty())
+        {
+            let _ = self.refresh_highlights(&path);
+        }
         Ok(())
     }
+    pub fn refresh_highlights(&mut self, path: &Path) -> Result<bool, String> {
+        if self
+            .document(path)
+            .and_then(|document| document.backend_snapshot.as_ref())
+            .is_some_and(|snapshot| snapshot.instance.is_empty())
+        {
+            return Err(
+                "Backend does not advertise highlighting snapshot identity".into()
+            );
+        }
+        let response = self
+            .navigate(path, crate::navigation::NavigationQuery::HighlightSnapshot)?;
+        match response {
+            ProxyResponse::HighlightSnapshot { highlights } => Ok(self
+                .documents
+                .files
+                .get_mut(path)
+                .is_some_and(|document| document.accept_highlights(highlights))),
+            _ => Err("Unexpected highlight response".into()),
+        }
+    }
+
     pub fn flush(&mut self, path: &Path) -> Result<(), String> {
         let document = self
             .documents

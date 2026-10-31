@@ -572,6 +572,7 @@ mod synchronization_tests {
         let owner = model.id();
         model
             .recover_sync(ProxyResponse::BufferSnapshot {
+                snapshot: Default::default(),
                 buffer_id: owner,
                 path: "example.txt".into(),
                 content: "remote".into(),
@@ -629,6 +630,7 @@ mod reopening_tests {
             .finish_reopen(
                 plan,
                 Ok(ProxyResponse::NewBufferResponse {
+                    snapshot: Default::default(),
                     content: "disk".into(),
                     read_only: false,
                     rev: 7,
@@ -741,6 +743,7 @@ mod disconnect_tests {
             .finish_opening(
                 opening,
                 Ok(lapce_rpc::proxy::ProxyResponse::NewBufferResponse {
+                    snapshot: Default::default(),
                     content: "disk🌍".into(),
                     read_only: false,
                     rev: 7,
@@ -777,6 +780,7 @@ mod disconnect_tests {
             .finish_reopen(
                 plan,
                 Ok(lapce_rpc::proxy::ProxyResponse::NewBufferResponse {
+                    snapshot: Default::default(),
                     content: String::new(),
                     read_only: true,
                     rev: 0,

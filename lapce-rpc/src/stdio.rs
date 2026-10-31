@@ -165,15 +165,24 @@ mod tests {
     #[test]
     fn acknowledged_update_response_roundtrips_over_json() {
         let mut bytes = Vec::new();
-        let message: ProxyMessage =
-            RpcMessage::Response(42, ProxyResponse::BufferUpdated { rev: 7 });
+        let identity = crate::highlighting::TextSnapshot {
+            instance: "backend-instance".into(),
+            revision: 7,
+        };
+        let message: ProxyMessage = RpcMessage::Response(
+            42,
+            ProxyResponse::BufferUpdated {
+                rev: 7,
+                snapshot: identity.clone(),
+            },
+        );
         write_msg(&mut bytes, message).unwrap();
         assert!(bytes.ends_with(b"\n"));
         let decoded: ProxyMessage =
             read_msg(&mut bytes.as_slice()).unwrap().unwrap();
         assert!(matches!(
             decoded,
-            RpcMessage::Response(42, ProxyResponse::BufferUpdated { rev: 7 })
+            RpcMessage::Response(42, ProxyResponse::BufferUpdated { rev: 7, snapshot }) if snapshot == identity
         ));
     }
 }

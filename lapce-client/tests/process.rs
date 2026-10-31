@@ -106,6 +106,7 @@ fn shared_queues_deliver_disk_events_and_acknowledge_each_frontend_revision() {
         .unwrap()
         {
             ProxyResponse::NewBufferResponse {
+                snapshot: _,
                 content,
                 read_only: true,
                 rev,
@@ -155,7 +156,7 @@ fn shared_queues_deliver_disk_events_and_acknowledge_each_frontend_revision() {
     for index in 0..2 {
         let rev = revisions[index] + 1;
         assert!(matches!(call(index, update(changed, rev)).unwrap(),
-            ProxyResponse::BufferUpdated { rev: accepted } if accepted == rev));
+            ProxyResponse::BufferUpdated { snapshot: _, rev: accepted } if accepted == rev));
         // A duplicate acknowledgement cannot advance the local revision again.
         assert!(call(index, update(changed, rev)).is_err());
         assert!(
@@ -549,7 +550,8 @@ fn socket_frontends_share_backend_and_disconnect_independently() {
         std::env::var_os("LAPCE_TEST_PROXY").expect("set LAPCE_TEST_PROXY");
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("source.rs");
-    std::fs::write(&path, "socket🌍").unwrap();
+    let source = "fn socket() { let globe = \"🌍\"; }\n";
+    std::fs::write(&path, source).unwrap();
     let socket = directory.path().join("backend.sock");
     let listener = UnixListener::bind(&socket).unwrap();
     let host = Arc::new(
@@ -606,10 +608,47 @@ fn socket_frontends_share_backend_and_disconnect_independently() {
             )
             .unwrap()
     };
+    let mut cached = None;
     for connection in [&first, &second] {
-        assert!(
-            matches!(open(connection), ProxyResponse::NewBufferResponse { content, read_only: true, .. } if content == "socket🌍")
-        );
+        let ProxyResponse::NewBufferResponse {
+            content,
+            read_only: true,
+            snapshot,
+            ..
+        } = open(connection)
+        else {
+            panic!("open response")
+        };
+        assert_eq!(content, source);
+        let deadline = std::time::Instant::now() + Duration::from_secs(10);
+        loop {
+            let ProxyResponse::HighlightSnapshot { highlights } = connection
+                .proxy_rpc
+                .request_timeout(
+                    ProxyRequest::GetHighlightSnapshot { path: path.clone() },
+                    Duration::from_secs(10),
+                )
+                .unwrap()
+            else {
+                panic!("highlight response")
+            };
+            if highlights.status == lapce_rpc::highlighting::HighlightStatus::Ready {
+                assert!(highlights.valid_for(&snapshot, source));
+                assert!(
+                    highlights.spans.iter().any(|span| span.scope == "function")
+                );
+                if let Some(previous) = &cached {
+                    assert_eq!(previous, &highlights);
+                }
+                cached = Some(highlights);
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "socket highlighting timed out"
+            );
+            let _ = connection.events.recv_timeout(Duration::from_millis(25));
+        }
     }
     first.shutdown_and_wait().unwrap();
     assert!(matches!(

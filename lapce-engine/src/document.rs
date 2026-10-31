@@ -66,6 +66,9 @@ pub struct Document {
     pub buffer: lapce_core::buffer::Buffer,
     pub syntax: lapce_core::syntax::Syntax,
     pub inlay_hints: Option<lapce_xi_rope::spans::Spans<lsp_types::InlayHint>>,
+    pub backend_snapshot: Option<lapce_rpc::highlighting::TextSnapshot>,
+    pub highlights:
+        Option<std::sync::Arc<lapce_rpc::highlighting::HighlightSnapshot>>,
     syntax_generation: u64,
     disk_baseline: Option<lapce_xi_rope::Rope>,
     missing_on_disk: bool,
@@ -100,14 +103,66 @@ impl Document {
             buffer: lapce_core::buffer::Buffer::new(""),
             syntax,
             inlay_hints: None,
+            backend_snapshot: None,
+            highlights: None,
             syntax_generation: 0,
             disk_baseline: None,
             missing_on_disk: false,
         }
     }
 
+    /// Rendering state accepts only spans for the exact authoritative text.
+    pub fn accept_highlights(
+        &mut self,
+        highlights: lapce_rpc::highlighting::HighlightSnapshot,
+    ) -> bool {
+        let Some(snapshot) = &self.backend_snapshot else {
+            return false;
+        };
+        if self.content.path() != Some(&highlights.path)
+            || snapshot.instance.is_empty()
+            || !highlights.valid_for(snapshot, &self.buffer.to_string())
+            || self.highlights.as_ref().is_some_and(|old| {
+                old.snapshot == highlights.snapshot
+                    && old.generation >= highlights.generation
+            })
+        {
+            return false;
+        }
+        let mut styles = lapce_xi_rope::spans::SpansBuilder::new(self.buffer.len());
+        for span in &highlights.spans {
+            styles.add_span(
+                lapce_xi_rope::Interval::new(span.start, span.end),
+                lapce_rpc::style::Style {
+                    fg_color: Some(span.scope.clone()),
+                },
+            );
+        }
+        self.syntax.language =
+            lapce_core::language::LapceLanguage::from_name(&highlights.language)
+                .unwrap_or(self.syntax.language);
+        self.syntax.styles = Some(styles.build());
+        self.syntax.remote_structure = (!highlights.structure.is_empty())
+            .then(|| std::sync::Arc::new(highlights.structure.clone()));
+        self.syntax.normal_lines = highlights.normal_lines.clone();
+        self.syntax.rev = self.buffer.rev();
+        self.syntax.text = self.buffer.text().clone();
+        self.syntax
+            .update_lens_height(self.syntax.line_height, self.syntax.lens_height);
+        self.highlights = Some(std::sync::Arc::new(highlights));
+        true
+    }
+
+    pub fn invalidate_highlights(&mut self) {
+        self.backend_snapshot = None;
+        self.highlights = None;
+        self.syntax.styles = None;
+        self.syntax.remote_structure = None;
+    }
+
     pub fn load(&mut self, text: lapce_xi_rope::Rope) {
         self.cancel_syntax_jobs();
+        self.invalidate_highlights();
         self.inlay_hints = None;
         self.buffer.init_content(text);
         self.disk_baseline = None;
@@ -259,6 +314,7 @@ impl Document {
     fn apply_annotation_deltas(&mut self, deltas: &[crate::editing::DocumentDelta]) {
         if !deltas.is_empty() {
             self.cancel_syntax_jobs();
+            self.invalidate_highlights();
         }
         if let Some(hints) = self.inlay_hints.as_mut() {
             for (_, delta, _) in deltas {

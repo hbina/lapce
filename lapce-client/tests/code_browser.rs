@@ -108,7 +108,10 @@ fn backend_browses_files_but_rejects_edits_saves_resources_and_debugging() {
             delta: reload,
             rev: 2
         }),
-        Ok(ProxyResponse::BufferUpdated { rev: 2 })
+        Ok(ProxyResponse::BufferUpdated {
+            snapshot: _,
+            rev: 2
+        })
     ));
     assert!(
         request(ProxyRequest::CloseBuffer {

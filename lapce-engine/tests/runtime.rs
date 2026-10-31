@@ -23,13 +23,17 @@ impl RequestExecutor for Backend {
                     "hello".into()
                 };
                 Ok(ProxyResponse::NewBufferResponse {
+                    snapshot: Default::default(),
                     rev: u64::from(!content.is_empty()),
                     content,
                     read_only: false,
                 })
             }
             ProxyRequest::UpdateBuffer { rev, .. } => {
-                Ok(ProxyResponse::BufferUpdated { rev })
+                Ok(ProxyResponse::BufferUpdated {
+                    snapshot: Default::default(),
+                    rev,
+                })
             }
             ProxyRequest::CloseBuffer { .. } if *self.fail_close.borrow() => {
                 Err(RpcError {
@@ -240,6 +244,7 @@ fn failed_open_does_not_publish_a_document_and_can_be_retried() {
                 Ok(ProxyResponse::Success {})
             } else {
                 Ok(ProxyResponse::NewBufferResponse {
+                    snapshot: Default::default(),
                     content: "disk".into(),
                     read_only: false,
                     rev: 7,

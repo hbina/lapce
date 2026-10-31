@@ -33,6 +33,7 @@ fn identical_text_after_reconnect_cannot_accept_retired_navigation() {
         .finish(
             &mut session,
             Ok(ProxyResponse::NewBufferResponse {
+                snapshot: Default::default(),
                 content: "🌍x\nnext".into(),
                 read_only: true,
                 rev: 0,
@@ -158,6 +159,7 @@ impl RequestExecutor for Backend {
         self.0.borrow_mut().push(request.clone());
         match request {
             ProxyRequest::NewBuffer { .. } => Ok(ProxyResponse::NewBufferResponse {
+                snapshot: Default::default(),
                 content: "🌍x\nnext".into(),
                 read_only: true,
                 rev: 9,

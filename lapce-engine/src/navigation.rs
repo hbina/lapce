@@ -10,15 +10,29 @@ use std::path::PathBuf;
 
 #[derive(Clone, Copy, Debug)]
 pub enum NavigationQuery {
-    Definition { offset: usize },
-    References { offset: usize },
-    Implementation { offset: usize },
-    Hover { offset: usize },
-    Highlights { offset: usize },
+    Definition {
+        offset: usize,
+    },
+    References {
+        offset: usize,
+    },
+    Implementation {
+        offset: usize,
+    },
+    Hover {
+        offset: usize,
+    },
+    Highlights {
+        offset: usize,
+    },
     Symbols,
     FoldingRanges,
     InlayHints,
     SemanticTokens,
+    HighlightSnapshot,
+    SyntaxLanguage {
+        language: lapce_core::language::LapceLanguage,
+    },
 }
 
 pub struct NavigationPlan {
@@ -92,7 +106,9 @@ impl NavigationPlan {
             NavigationQuery::Symbols
             | NavigationQuery::FoldingRanges
             | NavigationQuery::InlayHints
-            | NavigationQuery::SemanticTokens => None,
+            | NavigationQuery::SemanticTokens
+            | NavigationQuery::HighlightSnapshot
+            | NavigationQuery::SyntaxLanguage { .. } => None,
         };
         if offset.is_some_and(|offset| {
             offset > document.buffer.len()
@@ -137,6 +153,15 @@ impl NavigationPlan {
             }
             NavigationQuery::InlayHints => {
                 ProxyRequest::GetInlayHints { path: path.clone() }
+            }
+            NavigationQuery::SyntaxLanguage { language } => {
+                ProxyRequest::SetSyntaxLanguage {
+                    path: path.clone(),
+                    language: language.to_string(),
+                }
+            }
+            NavigationQuery::HighlightSnapshot => {
+                ProxyRequest::GetHighlightSnapshot { path: path.clone() }
             }
             NavigationQuery::SemanticTokens => {
                 ProxyRequest::GetSemanticTokens { path: path.clone() }
@@ -194,6 +219,15 @@ impl NavigationPlan {
                 ProxyResponse::GetInlayHints { .. }
             )
         );
+        let matches = matches
+            || matches!(
+                (&self.query, &response),
+                (
+                    NavigationQuery::HighlightSnapshot
+                        | NavigationQuery::SyntaxLanguage { .. },
+                    ProxyResponse::HighlightSnapshot { .. }
+                )
+            );
         let matches = matches
             || matches!(
                 (&self.query, &response),

@@ -88,6 +88,7 @@ fn interrupted_readonly_initial_load_can_reopen_an_empty_file() {
         .finish(
             &mut session,
             Ok(ProxyResponse::NewBufferResponse {
+                snapshot: Default::default(),
                 content: String::new(),
                 read_only: false,
                 rev: 0,
@@ -123,6 +124,7 @@ fn watcher_reload_requires_live_buffer_ownership() {
         .finish(
             &mut session,
             Ok(ProxyResponse::NewBufferResponse {
+                snapshot: Default::default(),
                 content: "disk".into(),
                 read_only: true,
                 rev: 0,
@@ -208,13 +210,16 @@ fn session_document_queues_local_edits_and_recovers_from_its_owned_text() {
     assert!(
         matches!(effect.request, ProxyRequest::UpdateBuffer { buffer_id, rev: 8, .. } if buffer_id == session.document.id)
     );
-    session
-        .synchronization
-        .as_mut()
-        .unwrap()
-        .acknowledge(effect.id, Ok(ProxyResponse::BufferUpdated { rev: 8 }));
+    session.synchronization.as_mut().unwrap().acknowledge(
+        effect.id,
+        Ok(ProxyResponse::BufferUpdated {
+            snapshot: Default::default(),
+            rev: 8,
+        }),
+    );
     session
         .recover_sync(ProxyResponse::BufferSnapshot {
+            snapshot: Default::default(),
             buffer_id: session.document.id,
             path: "example.txt".into(),
             content: "external".into(),
@@ -274,6 +279,7 @@ fn reopening_uses_latest_local_text_and_preserves_undo_history() {
     plan.finish(
         &mut session,
         Ok(ProxyResponse::NewBufferResponse {
+            snapshot: Default::default(),
             content: "hello".into(),
             read_only: false,
             rev: 20,
@@ -332,6 +338,7 @@ fn reopening_rejects_stale_owners_and_readonly_conflicts_without_losing_text() {
             .finish(
                 &mut session,
                 Ok(ProxyResponse::NewBufferResponse {
+                    snapshot: Default::default(),
                     content: "remote".into(),
                     read_only: true,
                     rev: 1
@@ -347,6 +354,7 @@ fn reopening_rejects_stale_owners_and_readonly_conflicts_without_losing_text() {
         .finish(
             &mut session,
             Ok(ProxyResponse::NewBufferResponse {
+                snapshot: Default::default(),
                 content: "local".into(),
                 read_only: true,
                 rev: 1,
@@ -359,6 +367,7 @@ fn reopening_rejects_stale_owners_and_readonly_conflicts_without_losing_text() {
             .finish(
                 &mut session,
                 Ok(ProxyResponse::NewBufferResponse {
+                    snapshot: Default::default(),
                     content: "wrong".into(),
                     read_only: false,
                     rev: 2
@@ -403,6 +412,7 @@ fn retargeting_requires_close_and_invalidates_old_reopen_attempts() {
             .finish(
                 &mut session,
                 Ok(ProxyResponse::NewBufferResponse {
+                    snapshot: Default::default(),
                     content: "local".into(),
                     read_only: false,
                     rev: 1
@@ -435,6 +445,7 @@ fn readonly_reopen_refreshes_disk_text_without_uploading_cached_text() {
     plan.finish(
         &mut session,
         Ok(ProxyResponse::NewBufferResponse {
+            snapshot: Default::default(),
             content: "disk🌍".into(),
             read_only: false,
             rev: 20,

@@ -57,6 +57,7 @@ pub struct Dispatcher {
     core_rpc: CoreRpcHandler,
     catalog_rpc: PluginCatalogRpcHandler,
     buffers: HashMap<PathBuf, Buffer>,
+    highlighting: crate::highlighting::HighlightService,
     terminals: HashMap<TermId, TerminalSender>,
     file_watcher: FileWatcher,
     search_generation: Arc<AtomicU64>,
@@ -83,6 +84,9 @@ impl ProxyHandler for Dispatcher {
         }
         use ProxyNotification::*;
         match rpc {
+            RefreshSemanticHighlights {} => {
+                self.highlighting.refresh_semantics(true)
+            }
             Initialize {
                 workspace,
                 language_server_configurations,
@@ -176,6 +180,7 @@ impl ProxyHandler for Dispatcher {
                 self.catalog_rpc.signature_help(request_id, &path, position);
             }
             Shutdown {} => {
+                self.highlighting.shutdown();
                 self.search_generation.fetch_add(1, Ordering::SeqCst);
                 self.catalog_rpc.shutdown();
                 for (_, sender) in self.terminals.iter() {
@@ -384,6 +389,7 @@ impl ProxyHandler for Dispatcher {
                             content: buffer.get_document(),
                             read_only: true,
                             rev: buffer.rev,
+                            snapshot: buffer.snapshot.clone(),
                         })
                     } else {
                         Err(Self::buffer_error(
@@ -404,6 +410,12 @@ impl ProxyHandler for Dispatcher {
                     content.clone(),
                 );
                 self.file_watcher.watch(&path, false, OPEN_FILE_EVENT_TOKEN);
+                let snapshot = buffer.snapshot.clone();
+                self.highlighting.schedule(
+                    path.clone(),
+                    snapshot.clone(),
+                    buffer.rope.clone(),
+                );
                 self.buffers.insert(path, buffer);
                 self.respond_rpc(
                     id,
@@ -411,6 +423,7 @@ impl ProxyHandler for Dispatcher {
                         content,
                         read_only,
                         rev,
+                        snapshot,
                     }),
                 );
             }
@@ -424,8 +437,43 @@ impl ProxyHandler for Dispatcher {
                         content: buffer.get_document(),
                         read_only: true,
                         rev: buffer.rev,
+                        snapshot: buffer.snapshot.clone(),
                     })
                     .ok_or_else(|| Self::buffer_error("buffer is not open"));
+                self.respond_rpc(id, result);
+            }
+            HighlightCode { blocks } => {
+                if let Err(error) = self.highlighting.highlight_code(blocks, id) {
+                    self.respond_rpc(id, Err(error));
+                }
+            }
+            SetSyntaxLanguage { path, language } => {
+                let result =
+                    lapce_core::language::LapceLanguage::from_name(&language)
+                        .and_then(|language| {
+                            self.highlighting.set_language(&path, language)
+                        })
+                        .map(|highlights| ProxyResponse::HighlightSnapshot {
+                            highlights,
+                        })
+                        .ok_or_else(|| {
+                            Self::buffer_error(
+                                "Unknown language or closed highlight document",
+                            )
+                        });
+                self.respond_rpc(id, result);
+            }
+            GetHighlightSnapshot { path } => {
+                self.highlighting.refresh_semantics(false);
+                let result = self
+                    .highlighting
+                    .get(&path)
+                    .map(|highlights| ProxyResponse::HighlightSnapshot {
+                        highlights,
+                    })
+                    .ok_or_else(|| {
+                        Self::buffer_error("Highlight document is not open")
+                    });
                 self.respond_rpc(id, result);
             }
             UpdateBuffer {
@@ -442,9 +490,13 @@ impl ProxyHandler for Dispatcher {
                     );
                     return;
                 }
-                let result = self
-                    .apply_buffer_update(&path, &delta, rev)
-                    .map(|()| ProxyResponse::BufferUpdated { rev });
+                let result =
+                    self.apply_buffer_update(&path, &delta, rev).map(|()| {
+                        ProxyResponse::BufferUpdated {
+                            rev,
+                            snapshot: self.buffers[&path].snapshot.clone(),
+                        }
+                    });
                 self.respond_rpc(id, result);
             }
             CloseBuffer { buffer_id, path } => {
@@ -457,6 +509,7 @@ impl ProxyHandler for Dispatcher {
                     return;
                 }
                 let result = if self.buffers.remove(&path).is_some() {
+                    self.highlighting.close(&path);
                     self.file_watcher.unwatch(&path, OPEN_FILE_EVENT_TOKEN);
                     self.catalog_rpc.did_close_document(&path);
                     Ok(ProxyResponse::Success {})
@@ -1220,10 +1273,15 @@ impl Dispatcher {
 
         Self {
             workspace: None,
-            proxy_rpc,
-            core_rpc,
-            catalog_rpc: plugin_rpc,
+            proxy_rpc: proxy_rpc.clone(),
+            core_rpc: core_rpc.clone(),
+            catalog_rpc: plugin_rpc.clone(),
             buffers: HashMap::new(),
+            highlighting: crate::highlighting::HighlightService::new(
+                core_rpc.clone(),
+                plugin_rpc.clone(),
+                proxy_rpc.clone(),
+            ),
             terminals: HashMap::new(),
             file_watcher,
             search_generation: Arc::new(AtomicU64::new(0)),
@@ -1264,6 +1322,11 @@ impl Dispatcher {
             ));
         }
         *buffer = candidate;
+        self.highlighting.schedule(
+            path.to_path_buf(),
+            buffer.snapshot.clone(),
+            buffer.rope.clone(),
+        );
         self.catalog_rpc.did_change_text_document(
             path,
             rev,

@@ -27,12 +27,21 @@ fn disk_updates_are_ordered_and_revision_mapping_is_acknowledged() {
     assert_eq!(
         sync.acknowledge(
             first.id + 99,
-            Ok(ProxyResponse::BufferUpdated { rev: 11 })
+            Ok(ProxyResponse::BufferUpdated {
+                snapshot: Default::default(),
+                rev: 11
+            })
         ),
         SyncOutcome::Stale
     );
     assert_eq!(
-        sync.acknowledge(first.id, Ok(ProxyResponse::BufferUpdated { rev: 11 })),
+        sync.acknowledge(
+            first.id,
+            Ok(ProxyResponse::BufferUpdated {
+                snapshot: Default::default(),
+                rev: 11
+            })
+        ),
         SyncOutcome::Edited
     );
     let effect = sync.next_effect().unwrap();
@@ -40,7 +49,13 @@ fn disk_updates_are_ordered_and_revision_mapping_is_acknowledged() {
         effect.request,
         ProxyRequest::UpdateBuffer { rev: 12, .. }
     ));
-    sync.acknowledge(effect.id, Ok(ProxyResponse::BufferUpdated { rev: 12 }));
+    sync.acknowledge(
+        effect.id,
+        Ok(ProxyResponse::BufferUpdated {
+            snapshot: Default::default(),
+            rev: 12,
+        }),
+    );
     assert!(sync.is_idle());
 }
 
@@ -65,6 +80,7 @@ fn failure_pauses_queue_and_explicit_recovery_preserves_local_text_without_savin
     ));
     assert!(sync.next_effect().is_none());
     let snapshot = ProxyResponse::BufferSnapshot {
+        snapshot: Default::default(),
         buffer_id: id,
         path: "test".into(),
         content: "remote".into(),
@@ -80,11 +96,23 @@ fn failure_pauses_queue_and_explicit_recovery_preserves_local_text_without_savin
     assert_eq!(rev, 6);
     assert_eq!(delta.apply(&Rope::from("remote")).to_string(), "local🌍");
     assert_eq!(
-        sync.acknowledge(old.id, Ok(ProxyResponse::BufferUpdated { rev: 1 })),
+        sync.acknowledge(
+            old.id,
+            Ok(ProxyResponse::BufferUpdated {
+                snapshot: Default::default(),
+                rev: 1
+            })
+        ),
         SyncOutcome::Stale
     );
     assert_eq!(
-        sync.acknowledge(effect.id, Ok(ProxyResponse::BufferUpdated { rev: 6 })),
+        sync.acknowledge(
+            effect.id,
+            Ok(ProxyResponse::BufferUpdated {
+                snapshot: Default::default(),
+                rev: 6
+            })
+        ),
         SyncOutcome::Edited
     );
     assert!(sync.is_idle());
@@ -101,7 +129,13 @@ fn bad_acknowledgements_and_foreign_snapshots_cannot_reset_synchronization() {
     );
     let effect = sync.next_effect().unwrap();
     assert!(matches!(
-        sync.acknowledge(effect.id, Ok(ProxyResponse::BufferUpdated { rev: 9 })),
+        sync.acknowledge(
+            effect.id,
+            Ok(ProxyResponse::BufferUpdated {
+                snapshot: Default::default(),
+                rev: 9
+            })
+        ),
         SyncOutcome::Failed(_)
     ));
     for (buffer_id, path, read_only) in [
@@ -112,6 +146,7 @@ fn bad_acknowledgements_and_foreign_snapshots_cannot_reset_synchronization() {
         assert!(
             sync.recover_keep_local(
                 ProxyResponse::BufferSnapshot {
+                    snapshot: Default::default(),
                     buffer_id,
                     path: path.into(),
                     content: "".into(),
@@ -139,7 +174,13 @@ fn backend_versions_map_before_and_after_acknowledgement_without_assuming_equal_
     );
     let effect = sync.next_effect().unwrap();
     assert_eq!(sync.local_version(11), Some(8));
-    sync.acknowledge(effect.id, Ok(ProxyResponse::BufferUpdated { rev: 11 }));
+    sync.acknowledge(
+        effect.id,
+        Ok(ProxyResponse::BufferUpdated {
+            snapshot: Default::default(),
+            rev: 11,
+        }),
+    );
     assert_eq!(sync.local_version(11), Some(8));
     assert_eq!(sync.local_version(10), None);
 }
@@ -160,7 +201,13 @@ fn language_requests_wait_for_edits_but_do_not_block_subsequent_edits() {
     let first = sync.next_effect().unwrap();
     assert!(!first.detached);
     assert!(sync.next_effect().is_none());
-    sync.acknowledge(first.id, Ok(ProxyResponse::BufferUpdated { rev: 1 }));
+    sync.acknowledge(
+        first.id,
+        Ok(ProxyResponse::BufferUpdated {
+            snapshot: Default::default(),
+            rev: 1,
+        }),
+    );
     let request = sync.next_effect().unwrap();
     assert_eq!(request.id, query);
     assert!(request.detached);
@@ -186,7 +233,13 @@ fn language_requests_wait_for_edits_but_do_not_block_subsequent_edits() {
         }
     );
     assert_eq!(
-        sync.acknowledge(next.id, Ok(ProxyResponse::BufferUpdated { rev: 2 })),
+        sync.acknowledge(
+            next.id,
+            Ok(ProxyResponse::BufferUpdated {
+                snapshot: Default::default(),
+                rev: 2
+            })
+        ),
         SyncOutcome::Edited
     );
     assert!(sync.is_idle());
@@ -215,7 +268,13 @@ fn notifications_and_queries_preserve_order_after_acknowledged_edits() {
     assert!(sync.next_notification().is_none());
     let edit = sync.next_effect().unwrap();
     assert!(sync.next_notification().is_none());
-    sync.acknowledge(edit.id, Ok(ProxyResponse::BufferUpdated { rev: 1 }));
+    sync.acknowledge(
+        edit.id,
+        Ok(ProxyResponse::BufferUpdated {
+            snapshot: Default::default(),
+            rev: 1,
+        }),
+    );
     assert!(sync.next_effect().is_none());
     assert!(matches!(
         sync.next_notification(),
@@ -265,7 +324,13 @@ fn close_waits_for_mutations_and_rejects_later_operations() {
     );
     let edit = sync.next_effect().unwrap();
     assert_eq!(
-        sync.acknowledge(edit.id, Ok(ProxyResponse::BufferUpdated { rev: 1 })),
+        sync.acknowledge(
+            edit.id,
+            Ok(ProxyResponse::BufferUpdated {
+                snapshot: Default::default(),
+                rev: 1
+            })
+        ),
         SyncOutcome::Edited
     );
     let effect = sync.next_effect().unwrap();
@@ -304,6 +369,7 @@ fn failed_close_preserves_state_and_recovery_cancels_closing() {
     assert!(sync.next_effect().is_none());
     sync.recover_keep_local(
         ProxyResponse::BufferSnapshot {
+            snapshot: Default::default(),
             buffer_id: owner,
             path: "test".into(),
             content: "".into(),

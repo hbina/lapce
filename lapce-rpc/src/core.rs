@@ -43,6 +43,9 @@ pub enum FileChanged {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "method", content = "params")]
 pub enum CoreNotification {
+    PublishHighlights {
+        highlights: crate::highlighting::HighlightSnapshot,
+    },
     ProxyStatus {
         status: ProxyStatus,
     },

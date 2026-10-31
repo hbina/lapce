@@ -200,7 +200,7 @@ impl DocumentSync {
         let result = match (operation, response) {
             (
                 Operation::Edit { local_rev, .. },
-                Ok(ProxyResponse::BufferUpdated { rev }),
+                Ok(ProxyResponse::BufferUpdated { rev, .. }),
             ) if rev == self.remote_rev + 1 => {
                 self.remote_rev = rev;
                 self.local_rev = *local_rev;
@@ -241,6 +241,7 @@ impl DocumentSync {
             content,
             read_only,
             rev,
+            ..
         } = snapshot
         else {
             return Err("Expected a backend document snapshot".into());

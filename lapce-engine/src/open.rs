@@ -19,6 +19,7 @@ pub struct OpenedDocument {
     pub content: String,
     pub read_only: bool,
     pub remote_revision: u64,
+    pub snapshot: lapce_rpc::highlighting::TextSnapshot,
 }
 
 /// An asynchronous opening belongs to one backend attachment as well as a file.
@@ -54,6 +55,7 @@ impl SessionOpening {
             .document
             .load(lapce_xi_rope::Rope::from(opened.content));
         session.initialize_sync(opened.remote_revision);
+        session.document.backend_snapshot = Some(opened.snapshot);
         Ok(())
     }
     pub fn capture(session: &mut crate::session::SessionDocument) -> Option<Self> {
@@ -122,10 +124,12 @@ impl OpenDocument {
                 content,
                 read_only: _,
                 rev,
+                snapshot,
             } => Ok(OpenedDocument {
                 content,
                 read_only: true,
                 remote_revision: rev,
+                snapshot,
             }),
             _ => Err(RpcError {
                 code: -32603,

@@ -146,6 +146,7 @@ impl SessionDocument {
     /// Invalidate transport ownership while preserving the loaded file snapshot.
     pub fn backend_disconnected(&mut self) {
         self.opening = false;
+        self.document.invalidate_highlights();
         self.synchronization = None;
         self.backend_generation += 1;
     }
@@ -154,6 +155,13 @@ impl SessionDocument {
             .as_ref()
             .is_some_and(|sync| sync.is_idle() && !sync.is_closed())
     }
+    pub fn accept_highlights(
+        &mut self,
+        highlights: lapce_rpc::highlighting::HighlightSnapshot,
+    ) -> bool {
+        self.backend_ready() && self.document.accept_highlights(highlights)
+    }
+
     pub fn acknowledge(
         &mut self,
         id: u64,
@@ -166,6 +174,15 @@ impl SessionDocument {
             .map_or(SyncOutcome::Stale, |sync| {
                 sync.acknowledge(id, response.clone())
             });
+        if matches!(outcome, SyncOutcome::Edited) && self.backend_ready() {
+            if let Ok(lapce_rpc::proxy::ProxyResponse::BufferUpdated {
+                snapshot,
+                ..
+            }) = &response
+            {
+                self.document.backend_snapshot = Some(snapshot.clone());
+            }
+        }
         let request_result = match &outcome {
             SyncOutcome::RequestCompleted { id, current } => Some((
                 *id,
@@ -346,6 +363,7 @@ impl ReopenDocument {
             content,
             read_only,
             rev,
+            snapshot,
         } = response.map_err(|error| error.message)?
         else {
             return Err("Unexpected document-reopen response".into());
@@ -357,6 +375,7 @@ impl ReopenDocument {
             .iter_chunks(..)
             .flat_map(str::bytes)
             .eq(content.bytes());
+        session.document.invalidate_highlights();
         if session.document.content.read_only() {
             if !session.document.loading.loaded {
                 session.document.load(lapce_xi_rope::Rope::from(content));
@@ -371,6 +390,7 @@ impl ReopenDocument {
                 session.document.buffer.rev(),
                 rev,
             ));
+            session.document.backend_snapshot = Some(snapshot);
             session.backend_generation += 1;
             return Ok(());
         }
@@ -394,6 +414,7 @@ impl ReopenDocument {
                     content,
                     read_only,
                     rev,
+                    snapshot,
                 },
                 session.document.buffer.text().clone(),
                 session.document.buffer.rev(),

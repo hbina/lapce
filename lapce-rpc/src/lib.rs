@@ -6,6 +6,7 @@ pub mod counter;
 pub mod dap_types;
 pub mod file;
 pub mod file_line;
+pub mod highlighting;
 mod parse;
 pub mod plugin;
 pub mod proxy;

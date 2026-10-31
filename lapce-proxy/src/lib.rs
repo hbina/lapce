@@ -3,6 +3,7 @@
 pub mod buffer;
 pub mod cli;
 pub mod dispatch;
+pub mod highlighting;
 pub mod plugin;
 pub mod terminal;
 #[cfg(unix)]

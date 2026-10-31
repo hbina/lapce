@@ -90,6 +90,17 @@ pub enum ProxyRequest {
     GetBuffer {
         path: PathBuf,
     },
+    /// Retrieve the latest result, including pending/unsupported status.
+    GetHighlightSnapshot {
+        path: PathBuf,
+    },
+    HighlightCode {
+        blocks: Vec<crate::highlighting::CodeBlock>,
+    },
+    SetSyntaxLanguage {
+        path: PathBuf,
+        language: String,
+    },
     /// An acknowledged edit. `rev` must be exactly the current revision + 1.
     UpdateBuffer {
         buffer_id: BufferId,
@@ -268,6 +279,9 @@ impl ProxyRequest {
         match self {
             NewBuffer { .. }
             | GetBuffer { .. }
+            | GetHighlightSnapshot { .. }
+            | SetSyntaxLanguage { .. }
+            | HighlightCode { .. }
             | CloseBuffer { .. }
             | UpdateBuffer { .. }
             | BufferHead { .. }
@@ -324,6 +338,8 @@ impl ProxyRequest {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "method", content = "params")]
 pub enum ProxyNotification {
+    /// Backend-internal signal after language-service initialization/status updates.
+    RefreshSemanticHighlights {},
     Initialize {
         workspace: PathBuf,
 
@@ -422,17 +438,25 @@ pub enum ProxyNotification {
 #[serde(rename_all = "snake_case")]
 #[serde(tag = "method", content = "params")]
 pub enum ProxyResponse {
+    CodeHighlights {
+        blocks: Vec<crate::highlighting::CodeHighlights>,
+    },
     ResourceOperationResponse {
         changed: bool,
     },
     GitGetRemoteFileUrl {
         file_url: String,
     },
+    HighlightSnapshot {
+        highlights: crate::highlighting::HighlightSnapshot,
+    },
     NewBufferResponse {
         content: String,
         read_only: bool,
         #[serde(default)]
         rev: u64,
+        #[serde(default)]
+        snapshot: crate::highlighting::TextSnapshot,
     },
     BufferSnapshot {
         buffer_id: BufferId,
@@ -440,9 +464,13 @@ pub enum ProxyResponse {
         content: String,
         read_only: bool,
         rev: u64,
+        #[serde(default)]
+        snapshot: crate::highlighting::TextSnapshot,
     },
     BufferUpdated {
         rev: u64,
+        #[serde(default)]
+        snapshot: crate::highlighting::TextSnapshot,
     },
     BufferHeadResponse {
         version: String,

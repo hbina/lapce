@@ -71,6 +71,7 @@ fn exercise_remote(
     });
     connection.shutdown_and_wait().unwrap();
     let ProxyResponse::NewBufferResponse {
+        snapshot: _,
         content,
         read_only: true,
         rev,
@@ -78,9 +79,11 @@ fn exercise_remote(
     else {
         panic!("remote backend must open a read-only buffer");
     };
-    assert!(matches!(snapshot.unwrap(), ProxyResponse::BufferSnapshot {
+    assert!(
+        matches!(snapshot.unwrap(), ProxyResponse::BufferSnapshot { snapshot: _,
         buffer_id: BufferId(0), path: returned_path, content: returned_content, read_only: true, rev: returned_rev
-    } if returned_path == path && returned_content == content && returned_rev == rev));
+    } if returned_path == path && returned_content == content && returned_rev == rev)
+    );
     assert!(save.is_err(), "remote backend accepted a save request");
     assert!(closed.is_ok(), "remote close failed: {closed:?}");
 }

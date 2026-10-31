@@ -23,6 +23,7 @@ pub struct Buffer {
     pub rope: Rope,
     pub path: PathBuf,
     pub rev: u64,
+    pub snapshot: lapce_rpc::highlighting::TextSnapshot,
     pub mod_time: Option<SystemTime>,
 }
 
@@ -58,6 +59,18 @@ impl Buffer {
             path,
             language_id,
             rev,
+            snapshot: lapce_rpc::highlighting::TextSnapshot {
+                instance: format!(
+                    "{}-{}-{}",
+                    std::process::id(),
+                    std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_nanos(),
+                    BufferId::next().0
+                ),
+                revision: rev,
+            },
             mod_time,
         }
     }
@@ -145,6 +158,7 @@ impl Buffer {
             }
         }
         self.rev = rev;
+        self.snapshot.revision = rev;
         let content_change = get_document_content_changes(delta, self);
         self.rope = delta.apply(&self.rope);
         Ok(

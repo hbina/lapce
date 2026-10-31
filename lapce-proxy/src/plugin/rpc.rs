@@ -13,7 +13,7 @@ use crossbeam_channel::{Receiver, Sender};
 use dyn_clone::DynClone;
 use floem_editor_core::buffer::rope_text::{RopeText, RopeTextRef};
 use jsonrpc_lite::{Id, JsonRpc, Params};
-use lapce_core::{encoding::offset_utf16_to_utf8, rope_text_pos::RopeTextPosition};
+use lapce_core::rope_text_pos::RopeTextPosition;
 use lapce_rpc::{
     RpcError,
     core::{CoreRpcHandler, ServerStatusParams},
@@ -1001,6 +1001,9 @@ impl PluginHostHandler {
                         );
                     }
                 }
+                if param.is_ok() {
+                    self.catalog_rpc.proxy_rpc.notification(lapce_rpc::proxy::ProxyNotification::RefreshSemanticHighlights {});
+                }
                 self.catalog_rpc.core_rpc.server_status(param);
             }
             _ => {
@@ -1192,34 +1195,41 @@ fn format_semantic_styles(
 
     let text = RopeTextRef::new(text);
     let mut highlights = Vec::new();
-    let mut line = 0;
-    let mut start = 0;
-    let mut last_start = 0;
-    for semantic_token in &tokens.data {
-        if semantic_token.delta_line > 0 {
-            line += semantic_token.delta_line as usize;
-            start = text.offset_of_line(line);
-        }
-
-        let sub_text = text.char_indices_iter(start..);
-        start += offset_utf16_to_utf8(sub_text, semantic_token.delta_start as usize);
-
-        let sub_text = text.char_indices_iter(start..);
-        let end =
-            start + offset_utf16_to_utf8(sub_text, semantic_token.length as usize);
-
-        let kind = semantic_legends.token_types[semantic_token.token_type as usize]
-            .as_str()
-            .to_string();
-        if start < last_start {
+    let mut line = 0u32;
+    let mut column = 0u32;
+    let mut previous_end = 0;
+    for token in &tokens.data {
+        line = line.checked_add(token.delta_line)?;
+        column = if token.delta_line > 0 {
+            token.delta_start
+        } else {
+            column.checked_add(token.delta_start)?
+        };
+        let end_column = column.checked_add(token.length)?;
+        if line as usize >= text.num_lines() {
             continue;
         }
-        last_start = start;
+        let start_position = lsp_types::Position::new(line, column);
+        let end_position = lsp_types::Position::new(line, end_column);
+        let start = text.offset_of_position(&start_position);
+        let end = text.offset_of_position(&end_position);
+        let Some(kind) = semantic_legends.token_types.get(token.token_type as usize)
+        else {
+            continue;
+        };
+        if start < previous_end
+            || start >= end
+            || text.offset_to_position(start) != start_position
+            || text.offset_to_position(end) != end_position
+        {
+            continue;
+        }
+        previous_end = end;
         highlights.push(LineStyle {
             start,
             end,
             style: Style {
-                fg_color: Some(kind),
+                fg_color: Some(kind.as_str().to_string()),
             },
         });
     }
@@ -1244,6 +1254,50 @@ fn semantic_tokens_legend(
 mod tests {
     use super::*;
     use lapce_rpc::proxy::ProxyRpcHandler;
+
+    #[test]
+    fn semantic_decoder_rejects_invalid_utf16_ranges_and_unknown_token_types() {
+        let provider = SemanticTokensServerCapabilities::SemanticTokensOptions(
+            lsp_types::SemanticTokensOptions {
+                legend: SemanticTokensLegend {
+                    token_types: vec![lsp_types::SemanticTokenType::FUNCTION],
+                    token_modifiers: vec![],
+                },
+                ..Default::default()
+            },
+        );
+        let token =
+            |delta_line, delta_start, length, token_type| lsp_types::SemanticToken {
+                delta_line,
+                delta_start,
+                length,
+                token_type,
+                token_modifiers_bitset: 0,
+            };
+        let tokens = SemanticTokens {
+            result_id: None,
+            data: vec![
+                token(0, 1, 1, 0),  // split the emoji's surrogate pair
+                token(0, 2, 1, 0),  // x after é and the emoji
+                token(1, 0, 3, 99), // invalid legend index
+                token(0, 0, 3, 0),  // abc
+                token(99, 0, 1, 0), // nonexistent line
+            ],
+        };
+        let styles = format_semantic_styles(
+            &Rope::from("é🌍x\r\nabc"),
+            Some(&provider),
+            &tokens,
+        )
+        .unwrap();
+        assert_eq!(
+            styles
+                .iter()
+                .map(|style| (style.start, style.end))
+                .collect::<Vec<_>>(),
+            vec![(6, 7), (9, 12)]
+        );
+    }
 
     #[test]
     fn language_server_host_rejects_removed_extension_requests() {

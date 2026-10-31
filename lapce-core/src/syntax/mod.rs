@@ -907,6 +907,7 @@ pub struct Syntax {
     pub lens_height: usize,
     pub styles: Option<Spans<Style>>,
     pub cancel_flag: Arc<AtomicUsize>,
+    pub remote_structure: Option<Arc<Vec<lapce_rpc::highlighting::StructureRange>>>,
 }
 
 impl std::fmt::Debug for Syntax {
@@ -935,17 +936,27 @@ impl Syntax {
 
     pub fn from_language(language: LapceLanguage) -> Syntax {
         let highlight = get_highlight_config(language).ok();
+        Self::with_layers(language, highlight.map(SyntaxLayers::new_empty))
+    }
+
+    /// Frontend presentation state, without grammar initialization or parsing.
+    pub fn without_parser(language: LapceLanguage) -> Syntax {
+        Self::with_layers(language, None)
+    }
+
+    fn with_layers(language: LapceLanguage, layers: Option<SyntaxLayers>) -> Syntax {
         Syntax {
             rev: 0,
             language,
             text: Rope::from(""),
-            layers: highlight.map(SyntaxLayers::new_empty),
+            layers,
             lens: Self::lens_from_normal_lines(0, 0, 0, &Vec::new()),
             line_height: 0,
             lens_height: 0,
             normal_lines: Vec::new(),
             styles: None,
             cancel_flag: Arc::new(AtomicUsize::new(0)),
+            remote_structure: None,
         }
     }
 
@@ -955,6 +966,11 @@ impl Syntax {
         new_text: Rope,
         edits: Option<&[SyntaxEdit]>,
     ) {
+        if self.cancel_flag.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+            self.styles = None;
+            self.normal_lines.clear();
+            return;
+        }
         let layers = match &mut self.layers {
             Some(layers) => layers,
             None => return,
@@ -963,7 +979,15 @@ impl Syntax {
         if let Err(err) =
             layers.update(self.rev, new_rev, &new_text, edits, &self.cancel_flag)
         {
-            tracing::error!("{:?}", err);
+            if !matches!(err, Error::Cancelled) {
+                tracing::error!("{:?}", err);
+            }
+            // A failed/cancelled parse must never expose styles from an older text.
+            self.styles = None;
+            self.normal_lines.clear();
+            self.rev = new_rev;
+            self.text = new_text;
+            return;
         }
         let tree = layers.try_tree();
 
@@ -1022,6 +1046,11 @@ impl Syntax {
             &normal_lines,
         );
 
+        if self.cancel_flag.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+            self.styles = None;
+            self.normal_lines.clear();
+            return;
+        }
         self.rev = new_rev;
         self.lens = lens;
         self.normal_lines = normal_lines;
@@ -1062,7 +1091,91 @@ impl Syntax {
         builder.build()
     }
 
+    fn remote_at(
+        &self,
+        offset: usize,
+    ) -> Option<&lapce_rpc::highlighting::StructureRange> {
+        let ranges = self.remote_structure.as_ref()?;
+        let index = ranges.partition_point(|range| range.end <= offset);
+        ranges.get(index).filter(|range| range.start <= offset)
+    }
+
+    /// Evaluate structural navigation once in the backend at parser boundaries.
+    /// Queries have constant answers between boundaries (including the position
+    /// immediately after each boundary). Adjacent equal answers are coalesced.
+    pub fn structural_ranges(&self) -> Vec<lapce_rpc::highlighting::StructureRange> {
+        let Some(tree) = self.layers.as_ref().and_then(|layers| layers.try_tree())
+        else {
+            return Vec::new();
+        };
+        let text = self.text.to_string();
+        let mut boundaries = std::collections::BTreeSet::from([0, text.len()]);
+        let mut cursor = tree.walk();
+        loop {
+            let node = cursor.node();
+            for offset in [node.start_byte(), node.end_byte()] {
+                boundaries.insert(offset);
+                if let Some(ch) = text.get(offset..).and_then(|s| s.chars().next()) {
+                    boundaries.insert(offset + ch.len_utf8());
+                }
+            }
+            if cursor.goto_first_child() {
+                continue;
+            }
+            loop {
+                if cursor.goto_next_sibling() {
+                    break;
+                }
+                if !cursor.goto_parent() {
+                    break;
+                }
+            }
+            if cursor.node().id() == tree.root_node().id() {
+                break;
+            }
+        }
+        let boundaries: Vec<_> = boundaries.into_iter().collect();
+        let mut result: Vec<lapce_rpc::highlighting::StructureRange> = Vec::new();
+        for (index, start) in boundaries.iter().copied().enumerate() {
+            if self.cancel_flag.load(std::sync::atomic::Ordering::Relaxed) != 0 {
+                return Vec::new();
+            }
+            let end = boundaries.get(index + 1).copied().unwrap_or(text.len() + 1);
+            let range = lapce_rpc::highlighting::StructureRange {
+                start,
+                end,
+                matching: self.find_matching_pair(start),
+                parent: self.parent_offset(start),
+                enclosing: self.find_enclosing_pair(start),
+                parentheses: self.find_enclosing_parentheses(start),
+                headers: self.sticky_headers(start).unwrap_or_default(),
+                previous: ["(", ")", "{", "}", "[", "]"]
+                    .map(|tag| self.find_tag(start, true, tag)),
+                next: ["(", ")", "{", "}", "[", "]"]
+                    .map(|tag| self.find_tag(start, false, tag)),
+            };
+            if let Some(previous) = result.last_mut() {
+                if previous.matching == range.matching
+                    && previous.parent == range.parent
+                    && previous.enclosing == range.enclosing
+                    && previous.parentheses == range.parentheses
+                    && previous.headers == range.headers
+                    && previous.previous == range.previous
+                    && previous.next == range.next
+                {
+                    previous.end = range.end;
+                    continue;
+                }
+            }
+            result.push(range);
+        }
+        result
+    }
+
     pub fn find_matching_pair(&self, offset: usize) -> Option<usize> {
+        if let Some(range) = self.remote_at(offset) {
+            return range.matching;
+        }
         let tree = self.layers.as_ref()?.try_tree()?;
         let node = tree
             .root_node()
@@ -1080,6 +1193,9 @@ impl Syntax {
     }
 
     pub fn parent_offset(&self, offset: usize) -> Option<usize> {
+        if let Some(range) = self.remote_at(offset) {
+            return range.parent;
+        }
         let tree = self.layers.as_ref()?.try_tree()?;
         let node = tree
             .root_node()
@@ -1094,6 +1210,16 @@ impl Syntax {
         previous: bool,
         tag: &str,
     ) -> Option<usize> {
+        if let Some(range) = self.remote_at(offset) {
+            let index = ["(", ")", "{", "}", "[", "]"]
+                .iter()
+                .position(|candidate| *candidate == tag)?;
+            return if previous {
+                range.previous[index]
+            } else {
+                range.next[index]
+            };
+        }
         let tree = self.layers.as_ref()?.try_tree()?;
         let node = tree
             .root_node()
@@ -1151,6 +1277,9 @@ impl Syntax {
     }
 
     pub fn sticky_headers(&self, offset: usize) -> Option<Vec<usize>> {
+        if let Some(range) = self.remote_at(offset) {
+            return Some(range.headers.clone());
+        }
         let tree = self.layers.as_ref()?.try_tree()?;
         let mut node = tree.root_node().descendant_for_byte_range(offset, offset)?;
         let mut offsets = Vec::new();
@@ -1172,6 +1301,9 @@ impl Syntax {
         &self,
         offset: usize,
     ) -> Option<(usize, usize)> {
+        if let Some(range) = self.remote_at(offset) {
+            return range.parentheses;
+        }
         if offset >= self.text.len() {
             return None;
         }
@@ -1204,6 +1336,9 @@ impl Syntax {
     }
 
     pub fn find_enclosing_pair(&self, offset: usize) -> Option<(usize, usize)> {
+        if let Some(range) = self.remote_at(offset) {
+            return range.enclosing;
+        }
         if self.language == LapceLanguage::Markdown {
             // TODO: fix the issue that sometimes node.prev_sibling can stuck for markdown
             return None;

@@ -150,6 +150,7 @@ fn read_only_document_lifecycle_preserves_ownership_and_reload_validation() {
         },
     ) {
         ProxyResponse::NewBufferResponse {
+            snapshot: _,
             content,
             read_only: true,
             rev,

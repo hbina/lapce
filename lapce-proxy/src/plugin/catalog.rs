@@ -300,6 +300,7 @@ impl PluginCatalog {
                 }
 
                 self.plugins.insert(plugin.plugin_id, plugin);
+                self.plugin_rpc.proxy_rpc.notification(lapce_rpc::proxy::ProxyNotification::RefreshSemanticHighlights {});
             }
             Shutdown => {
                 for (_, plugin) in self.plugins.iter() {
