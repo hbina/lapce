@@ -1,4 +1,5 @@
 //! Read-only iced adapter over the shared workspace engine.
+mod highlighting;
 mod tree;
 mod worker;
 
@@ -17,6 +18,7 @@ struct Browser {
     events: mpsc::Receiver<Result<Snapshot, String>>,
     snapshot: Snapshot,
     content: text_editor::Content,
+    highlight_settings: highlighting::Settings,
     path_input: String,
     query: String,
     error: String,
@@ -46,7 +48,9 @@ impl Browser {
             commands,
             events,
             snapshot: Snapshot::default(),
-            content: text_editor::Content::new(),
+            // iced needs a real buffer line before cursor/layout rendering.
+            content: text_editor::Content::with_text(""),
+            highlight_settings: highlighting::Settings::default(),
             path_input,
             query: String::new(),
             error: String::new(),
@@ -85,6 +89,16 @@ impl Browser {
                                     },
                                     selection: None,
                                 });
+                            }
+                            if !self
+                                .highlight_settings
+                                .matches(snapshot.highlights.as_deref())
+                            {
+                                self.highlight_settings =
+                                    highlighting::Settings::new(
+                                        &snapshot.content,
+                                        snapshot.highlights.as_deref(),
+                                    );
                             }
                             self.snapshot = snapshot;
                         }
@@ -186,6 +200,10 @@ impl Browser {
                 row![
                     scrollable(files).width(220).height(Length::Fill),
                     text_editor(&self.content)
+                        .highlight_with::<highlighting::BackendHighlighter>(
+                            self.highlight_settings.clone(),
+                            highlighting::format
+                        )
                         .on_action(Message::Action)
                         .font(iced::Font::MONOSPACE)
                         .size(16)
@@ -304,11 +322,86 @@ pub fn launch() -> Result<(), Box<dyn std::error::Error>> {
 mod tests {
     use super::*;
     #[test]
+    #[cfg(feature = "embedded-backend")]
+    fn directory_startup_initializes_an_empty_editor_line() {
+        let directory = tempfile::tempdir().unwrap();
+        let browser = Browser::new(worker::Options {
+            root: directory.path().into(),
+            files: vec![],
+            backend: lapce_client::LocalBackend::Embedded,
+            lsp: None,
+        });
+        assert_eq!(browser.content.line_count(), 1);
+        assert!(browser.content.is_empty());
+    }
+
+    #[test]
     fn cursor_offsets_are_utf8_and_clamped() {
         assert_eq!(byte_offset("a🌍b\nλx", 0, 5), 5);
         assert_eq!(byte_offset("a🌍b\nλx", 1, 2), 9);
         assert_eq!(byte_offset("a🌍b\nλx", 99, 99), 10);
     }
+    #[test]
+    fn highlight_only_updates_preserve_editor_cursor_selection_and_text() {
+        use lapce_rpc::highlighting::{
+            HighlightSnapshot, HighlightSpan, HighlightStatus, TextSnapshot,
+        };
+        let (commands, _input) = mpsc::sync_channel(1);
+        let (output, events) = mpsc::channel();
+        let mut browser = Browser {
+            worker: None,
+            commands,
+            events,
+            snapshot: Snapshot::default(),
+            content: text_editor::Content::new(),
+            highlight_settings: highlighting::Settings::default(),
+            path_input: String::new(),
+            query: String::new(),
+            error: String::new(),
+        };
+        let mut snapshot = Snapshot {
+            path: "a.rs".into(),
+            content: "fn main() {}\n".into(),
+            ..Default::default()
+        };
+        output.send(Ok(snapshot.clone())).unwrap();
+        let _ = browser.update(Message::Tick);
+        browser.content.move_to(text_editor::Cursor {
+            position: text_editor::Position { line: 0, column: 7 },
+            selection: Some(text_editor::Position { line: 0, column: 3 }),
+        });
+        let before_cursor = browser.content.cursor();
+        let before_text = browser.content.text();
+        snapshot.highlights = Some(std::sync::Arc::new(HighlightSnapshot {
+            path: snapshot.path.clone(),
+            language: "Rust".into(),
+            snapshot: TextSnapshot {
+                instance: "one".into(),
+                revision: 1,
+            },
+            text_len: snapshot.content.len(),
+            generation: 1,
+            status: HighlightStatus::Ready,
+            spans: vec![HighlightSpan {
+                start: 0,
+                end: 2,
+                scope: "keyword".into(),
+            }],
+            brackets: vec![],
+            structure: vec![],
+            normal_lines: vec![],
+        }));
+        output.send(Ok(snapshot.clone())).unwrap();
+        let _ = browser.update(Message::Tick);
+        assert_eq!(browser.content.cursor(), before_cursor);
+        assert_eq!(browser.content.text(), before_text);
+        assert!(
+            browser
+                .highlight_settings
+                .matches(snapshot.highlights.as_deref())
+        );
+    }
+
     #[test]
     fn editing_actions_cannot_change_code() {
         let (commands, _input) = mpsc::sync_channel(1);
@@ -319,6 +412,7 @@ mod tests {
             events,
             snapshot: Snapshot::default(),
             content: text_editor::Content::with_text("read only"),
+            highlight_settings: highlighting::Settings::default(),
             path_input: String::new(),
             query: String::new(),
             error: String::new(),

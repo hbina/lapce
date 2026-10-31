@@ -25,6 +25,7 @@ name = "lapce-proxy"
 path = "src/bin/lapce-proxy.rs"
 
 [workspace]
+exclude = ["patches/iced_graphics"]
 members = ["lapce-app", "lapce-proxy", "lapce-rpc", "lapce-core", "lapce-client", "lapce-engine", "lapce-services", "lapce-iced"]
 
 [workspace.package]
@@ -95,6 +96,8 @@ rev = "31fa8f444c37f4c314f47d88c23ffdbc25f2ab53"
 features = ["serde"]
 
 [patch.crates-io]
+# Keep offscreen caret layouts valid when async highlighting updates attributes.
+iced_graphics = { path = "patches/iced_graphics" }
 # Temporarily patch lsp-types with a version that adds message-type debug
 lsp-types = { git = "https://github.com/lapce/lsp-types", rev = "feaa1e2ec80975c9dadd400a238ceacf071058e6" }
 

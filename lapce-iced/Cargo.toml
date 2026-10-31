@@ -6,7 +6,7 @@ license = { workspace = true }
 rust-version = { workspace = true }
 
 [dependencies]
-iced = { version = "0.14", default-features = false, features = ["tiny-skia", "x11", "wayland", "tokio"] }
+iced = { version = "0.14", default-features = false, features = ["advanced", "tiny-skia", "x11", "wayland", "tokio"] }
 lapce-client = { workspace = true }
 lapce-engine = { workspace = true }
 lapce-services = { workspace = true }

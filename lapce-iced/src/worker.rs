@@ -109,6 +109,8 @@ pub struct Snapshot {
     pub directory: PathBuf,
     pub content: String,
     pub revision: u64,
+    pub highlights:
+        Option<std::sync::Arc<lapce_rpc::highlighting::HighlightSnapshot>>,
     pub tree: DirectoryTree,
     pub open_files: Vec<PathBuf>,
     pub status: String,
@@ -207,6 +209,7 @@ fn serve(
             if let Some(document) = session.document(&snapshot.path) {
                 snapshot.content = document.buffer.to_string();
                 snapshot.revision = document.buffer.rev();
+                snapshot.highlights = document.highlights.clone();
             }
             snapshot.diagnostics = session
                 .diagnostics
@@ -263,6 +266,9 @@ fn open(
         }
         snapshot.path = path;
     }
+    snapshot.highlights = session
+        .document(&snapshot.path)
+        .and_then(|document| document.highlights.clone());
     snapshot.content = session
         .document(&snapshot.path)
         .ok_or("File did not open")?
@@ -648,6 +654,24 @@ mod tests {
             lsp: lsp.clone(),
         });
         let loaded = receive_until(&events, |snapshot| snapshot.content == original);
+        let colored = |snapshot: &Snapshot, text: &str| {
+            snapshot.content == text
+                && snapshot.highlights.as_ref().is_some_and(|highlights| {
+                    highlights.status
+                        == lapce_rpc::highlighting::HighlightStatus::Ready
+                        && highlights
+                            .spans
+                            .iter()
+                            .any(|span| span.scope == "keyword")
+                        && highlights
+                            .spans
+                            .iter()
+                            .any(|span| span.scope == "function")
+                })
+        };
+        if !colored(&loaded, original) {
+            receive_until(&events, |snapshot| colored(snapshot, original));
+        }
         commands.send(Command::Search("answer".into())).unwrap();
         receive_until(&events, |snapshot| {
             snapshot.results.iter().any(|(file, _, _)| file == &path)
@@ -686,7 +710,11 @@ mod tests {
         }
         let changed = original.replace("42", "43");
         std::fs::write(&path, &changed).unwrap();
-        receive_until(&events, |snapshot| snapshot.content == changed);
+        let reloaded =
+            receive_until(&events, |snapshot| snapshot.content == changed);
+        if !colored(&reloaded, &changed) {
+            receive_until(&events, |snapshot| colored(snapshot, &changed));
+        }
         drop(commands);
         while events.recv_timeout(Duration::from_secs(15)).is_ok() {}
         thread.join().unwrap();
