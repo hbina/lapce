@@ -5,6 +5,7 @@ use lapce_xi_rope::{LinesMetric, Rope, spans::Spans};
 
 pub const SCOPES: &[&str] = &[
     "constant",
+    "number",
     "type",
     "type.builtin",
     "property",

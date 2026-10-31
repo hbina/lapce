@@ -1,21 +1,15 @@
 use std::{
     collections::{HashMap, HashSet, hash_map::Entry},
-    fmt::Write,
     path::Path,
     str::FromStr,
 };
 
 use lapce_rpc::style::{LineStyle, Style};
-use once_cell::sync::Lazy;
-use regex::Regex;
 use strum_macros::{AsRefStr, Display, EnumMessage, EnumString, IntoStaticStr};
 use tracing::{Level, event};
 use tree_sitter::{Point, TreeCursor};
 
-use crate::{
-    directory::Directory,
-    syntax::highlight::{HighlightConfiguration, HighlightIssue},
-};
+use crate::syntax::highlight::{HighlightConfiguration, HighlightIssue};
 
 #[remain::sorted]
 pub enum Indent {
@@ -117,12 +111,6 @@ pub struct SyntaxProperties {
 
 #[derive(Eq, PartialEq, Hash, Clone, Copy, Debug, PartialOrd, Ord, Default)]
 struct TreeSitterProperties {
-    /// the grammar name that's in the grammars folder
-    grammar: Option<&'static str>,
-    /// the grammar fn name
-    grammar_fn: Option<&'static str>,
-    /// the query folder name
-    query: Option<&'static str>,
     /// Preface: Originally this feature was called "Code Lens", which is not
     /// an LSP "Code Lens". It is renamed to "Code Glance", below doc text is
     /// left unchanged.  
@@ -145,9 +133,6 @@ struct TreeSitterProperties {
 
 impl TreeSitterProperties {
     const DEFAULT: Self = Self {
-        grammar: None,
-        grammar_fn: None,
-        query: None,
         code_glance: (DEFAULT_CODE_GLANCE_LIST, DEFAULT_CODE_GLANCE_IGNORE_LIST),
         sticky_headers: &[],
     };
@@ -548,9 +533,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["c", "h"],
         comment: comment_properties!("//"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (DEFAULT_CODE_GLANCE_LIST, DEFAULT_CODE_GLANCE_IGNORE_LIST),
             sticky_headers: &["function_definition", "struct_specifier"],
         },
@@ -578,9 +560,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["cmake"],
         comment: comment_properties!("#"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (DEFAULT_CODE_GLANCE_LIST, DEFAULT_CODE_GLANCE_IGNORE_LIST),
             sticky_headers: &["function_definition"],
         },
@@ -600,9 +579,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["cpp", "cxx", "cc", "c++", "hpp", "hxx", "hh", "h++"],
         comment: comment_properties!("//"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (DEFAULT_CODE_GLANCE_LIST, DEFAULT_CODE_GLANCE_IGNORE_LIST),
             sticky_headers: &[
                 "function_definition",
@@ -618,9 +594,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["cs", "csx"],
         comment: comment_properties!("#"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (DEFAULT_CODE_GLANCE_LIST, DEFAULT_CODE_GLANCE_IGNORE_LIST),
             sticky_headers: &[
                 "interface_declaration",
@@ -680,9 +653,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
             multi_line_end: Some("*/"),
         },
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (
                 &["program", "class_definition"],
                 &[
@@ -734,9 +704,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["ex", "exs", "eex", "heex", "sface"],
         comment: comment_properties!("#"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (DEFAULT_CODE_GLANCE_LIST, DEFAULT_CODE_GLANCE_IGNORE_LIST),
             sticky_headers: &["do_block"],
         },
@@ -875,9 +842,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["go"],
         comment: comment_properties!("//"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (
                 &[
                     "source_file",
@@ -1002,9 +966,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["js", "cjs", "mjs"],
         comment: comment_properties!("//"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (&["source_file", "program"], &["source_file"]),
             sticky_headers: &[],
         },
@@ -1048,9 +1009,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["jsx"],
         comment: comment_properties!("//"),
         tree_sitter: TreeSitterProperties {
-            grammar: Some("javascript"),
-            grammar_fn: Some("javascript"),
-            query: Some("jsx"),
             code_glance: (&["source_file", "program"], &["source_file"]),
             sticky_headers: &[],
         },
@@ -1187,9 +1145,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &[],
         comment: comment_properties!(),
         tree_sitter: TreeSitterProperties {
-            grammar: Some("markdown_inline"),
-            grammar_fn: Some("markdown_inline"),
-            query: Some("markdown.inline"),
             code_glance: (DEFAULT_CODE_GLANCE_LIST, DEFAULT_CODE_GLANCE_IGNORE_LIST),
             sticky_headers: &[],
         },
@@ -1303,9 +1258,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["php"],
         comment: comment_properties!("//"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (
                 &[
                     "program",
@@ -1376,9 +1328,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["py", "pyi", "pyc", "pyd", "pyw"],
         comment: comment_properties!("#"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (
                 &[
                     "source_file",
@@ -1457,9 +1406,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["rb"],
         comment: comment_properties!("#"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (DEFAULT_CODE_GLANCE_LIST, DEFAULT_CODE_GLANCE_IGNORE_LIST),
             sticky_headers: &["module", "class", "method", "do_block"],
         },
@@ -1471,9 +1417,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["rs"],
         comment: comment_properties!("//"),
         tree_sitter: TreeSitterProperties {
-            grammar: None,
-            grammar_fn: None,
-            query: None,
             code_glance: (
                 &["source_file", "impl_item", "trait_item", "declaration_list"],
                 &["source_file", "use_declaration", "line_comment"],
@@ -1597,9 +1540,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["tsx"],
         comment: comment_properties!("//"),
         tree_sitter: TreeSitterProperties {
-            grammar: Some("tsx"),
-            grammar_fn: Some("tsx"),
-            query: Some("tsx"),
             code_glance: (&["source_file", "program"], &["source_file"]),
             sticky_headers: &[],
         },
@@ -1611,9 +1551,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
         extensions: &["ts", "cts", "mts"],
         comment: comment_properties!("//"),
         tree_sitter: TreeSitterProperties {
-            grammar: Some("typescript"),
-            grammar_fn: Some("typescript"),
-            query: Some("typescript"),
             code_glance: (&["source_file", "program"], &["source_file"]),
             sticky_headers: &[],
         },
@@ -1693,9 +1630,6 @@ const LANGUAGES: &[SyntaxProperties] = &[
 ];
 
 impl LapceLanguage {
-    const HIGHLIGHTS_INJECTIONS_FILE_NAME: &'static str = "injections.scm";
-    const HIGHLIGHTS_QUERIES_FILE_NAME: &'static str = "highlights.scm";
-
     pub fn from_path(path: &Path) -> LapceLanguage {
         Self::from_path_raw(path).unwrap_or(LapceLanguage::PlainText)
     }
@@ -1778,90 +1712,33 @@ impl LapceLanguage {
         self.properties().indent
     }
 
-    fn get_grammar(&self) -> Option<tree_sitter::Language> {
-        let grammar_name = self.grammar_name();
-        let grammar_fn_name = self.grammar_fn_name();
-
-        if let Some(grammars_dir) = Directory::grammars_directory() {
-            match self::load_grammar(&grammar_name, &grammar_fn_name, &grammars_dir)
-            {
-                Ok(grammar) => {
-                    return Some(grammar);
-                }
-                Err(err) => {
-                    if self != &LapceLanguage::PlainText {
-                        tracing::error!("{:?} {:?}", self, err);
-                    }
-                }
-            }
-        };
-
-        None
-    }
-
-    fn query_name(&self) -> String {
-        self.properties()
-            .tree_sitter
-            .query
-            .unwrap_or(self.properties().id.as_ref())
-            .to_lowercase()
-    }
-
-    fn grammar_name(&self) -> String {
-        self.properties()
-            .tree_sitter
-            .grammar
-            .unwrap_or(self.properties().id.as_ref())
-            .to_lowercase()
-    }
-
-    fn grammar_fn_name(&self) -> String {
-        self.properties()
-            .tree_sitter
-            .grammar_fn
-            .unwrap_or(self.properties().id.as_ref())
-            .to_lowercase()
-    }
-
-    fn get_grammar_query(&self) -> (String, String) {
-        let query_name = self.query_name();
-
-        // Try reading highlights from user config dir
-        if let Some(queries_dir) = Directory::queries_directory() {
-            return (
-                read_grammar_query(
-                    &queries_dir,
-                    &query_name,
-                    Self::HIGHLIGHTS_QUERIES_FILE_NAME,
-                ),
-                read_grammar_query(
-                    &queries_dir,
-                    &query_name,
-                    Self::HIGHLIGHTS_INJECTIONS_FILE_NAME,
-                ),
-            );
-        }
-
-        ("".to_string(), "".to_string())
-    }
-
+    /// Parser and queries are shipped together in the executable. No runtime
+    /// filesystem or network access is needed to initialize highlighting.
     pub(crate) fn new_highlight_config(
         &self,
     ) -> Result<HighlightConfiguration, HighlightIssue> {
-        let grammar = self.get_grammar().ok_or(HighlightIssue::NotAvailable)?;
-        let (query, injection) = self.get_grammar_query();
-
-        match HighlightConfiguration::new(grammar, &query, &injection, "") {
-            Ok(x) => Ok(x),
-            Err(x) => {
-                let str = format!(
-                    "Encountered {x:?} while trying to construct HighlightConfiguration for {}",
-                    self.name()
-                );
-                event!(Level::ERROR, "{str}");
-                Err(HighlightIssue::Error(str))
-            }
-        }
+        let (grammar, query, injections) = match self {
+            Self::Rust => (
+                tree_sitter_rust::language(),
+                tree_sitter_rust::HIGHLIGHTS_QUERY.to_owned(),
+                tree_sitter_rust::INJECTIONS_QUERY,
+            ),
+            Self::Python => (
+                tree_sitter_python::language(),
+                // This highlighter gives earlier patterns precedence. Upstream's
+                // generic identifier is first, so move it after specific captures.
+                format!(
+                    "{}\n(identifier) @variable\n",
+                    tree_sitter_python::HIGHLIGHTS_QUERY
+                        .replace("(identifier) @variable", "")
+                ),
+                "",
+            ),
+            _ => return Err(HighlightIssue::NotAvailable),
+        };
+        HighlightConfiguration::new(grammar, &query, injections, "").map_err(
+            |error| HighlightIssue::Error(format!("{}: {error}", self.name())),
+        )
     }
 
     pub(crate) fn walk_tree(
@@ -1872,64 +1749,6 @@ impl LapceLanguage {
         let (list, ignore_list) = self.properties().tree_sitter.code_glance;
         walk_tree(cursor, normal_lines, list, ignore_list);
     }
-}
-
-fn load_grammar(
-    grammar_name: &str,
-    grammar_fn_name: &str,
-    path: &Path,
-) -> Result<tree_sitter::Language, HighlightIssue> {
-    let mut library_path = path.join(format!("libtree-sitter-{grammar_name}"));
-    library_path.set_extension(std::env::consts::DLL_EXTENSION);
-
-    if !library_path.exists() {
-        event!(Level::WARN, "Grammar not found at: {library_path:?}");
-
-        // Load backward compat libraries
-        library_path = path.join(format!("tree-sitter-{grammar_name}"));
-        library_path.set_extension(std::env::consts::DLL_EXTENSION);
-
-        if !library_path.exists() {
-            event!(Level::WARN, "Grammar not found at: {library_path:?}");
-            return Err(HighlightIssue::Error("grammar not found".to_string()));
-        }
-    }
-
-    event!(Level::DEBUG, "Loading grammar from user grammar dir");
-    let library = match unsafe { libloading::Library::new(&library_path) } {
-        Ok(v) => v,
-        Err(e) => {
-            let err = format!("Failed to load '{}': '{e}'", library_path.display());
-            event!(Level::ERROR, err);
-            return Err(HighlightIssue::Error(err));
-        }
-    };
-
-    let language_fn_name =
-        format!("tree_sitter_{}", grammar_fn_name.replace('-', "_"));
-    event!(
-        Level::DEBUG,
-        "Loading grammar with address: '{language_fn_name}'"
-    );
-    let language = unsafe {
-        let language_fn: libloading::Symbol<
-            unsafe extern "C" fn() -> tree_sitter::Language,
-        > = match library.get(language_fn_name.as_bytes()) {
-            Ok(v) => v,
-            Err(e) => {
-                let err = format!("Failed to load '{language_fn_name}': '{e}'");
-                event!(Level::ERROR, err);
-                if let Some(e) = library.close().err() {
-                    event!(Level::ERROR, "Failed to drop loaded library: {e}");
-                };
-                return Err(HighlightIssue::Error(err));
-            }
-        };
-        language_fn()
-    };
-    std::mem::forget(library);
-
-    Ok(language)
 }
 
 /// Walk an AST and determine which lines to include in the code glance.
@@ -1987,6 +1806,10 @@ pub(crate) fn walk_tree_bracket_ast(
     bracket_pos: &mut HashMap<usize, Vec<LineStyle>>,
     palette: &Vec<String>,
 ) {
+    // Missing nodes have no source character and cannot be colored.
+    if cursor.node().is_missing() {
+        return;
+    }
     if cursor.node().kind().ends_with('(')
         || cursor.node().kind().ends_with('{')
         || cursor.node().kind().ends_with('[')
@@ -2029,36 +1852,6 @@ pub(crate) fn walk_tree_bracket_ast(
         }
         cursor.goto_parent();
     }
-}
-
-fn read_grammar_query(queries_dir: &Path, name: &str, kind: &str) -> String {
-    static INHERITS_REGEX: Lazy<Regex> =
-        Lazy::new(|| Regex::new(r";+\s*inherits\s*:?\s*([a-z_,()-]+)\s*").unwrap());
-
-    let file = queries_dir.join(name).join(kind);
-    let query = std::fs::read_to_string(&file).unwrap_or_else(|err| {
-        tracing::event!(
-            tracing::Level::WARN,
-            "Failed to read queries at: {file:?}, {err}"
-        );
-        String::new()
-    });
-
-    INHERITS_REGEX
-        .replace_all(&query, |captures: &regex::Captures| {
-            captures[1]
-                .split(',')
-                .fold(String::new(), |mut output, name| {
-                    write!(
-                        output,
-                        "\n{}\n",
-                        read_grammar_query(queries_dir, name, kind)
-                    )
-                    .unwrap();
-                    output
-                })
-        })
-        .to_string()
 }
 
 #[cfg(test)]

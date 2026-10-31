@@ -741,17 +741,6 @@ impl WindowTabData {
                 }
             }
 
-            OpenGrammarsDirectory => {
-                if let Some(dir) = Directory::grammars_directory() {
-                    open_uri(&dir);
-                }
-            }
-            OpenQueriesDirectory => {
-                if let Some(dir) = Directory::queries_directory() {
-                    open_uri(&dir);
-                }
-            }
-
             InstallTheme => {}
             ExportCurrentThemeSettings => {
                 self.main_split.export_theme();

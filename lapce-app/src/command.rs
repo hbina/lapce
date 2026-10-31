@@ -305,14 +305,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Open Themes Directory")]
     OpenThemesDirectory,
 
-    #[strum(serialize = "open_grammars_directory")]
-    #[strum(message = "Open Grammars Directory")]
-    OpenGrammarsDirectory,
-
-    #[strum(serialize = "open_queries_directory")]
-    #[strum(message = "Open Queries Directory")]
-    OpenQueriesDirectory,
-
     #[strum(serialize = "zoom_in")]
     #[strum(message = "Zoom In")]
     ZoomIn,

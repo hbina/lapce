@@ -13,7 +13,7 @@ use floem::{
     IntoView, View,
     action::show_context_menu,
     event::{Event, EventListener, EventPropagation},
-    ext_event::{create_ext_action, create_signal_from_channel},
+    ext_event::create_signal_from_channel,
     menu::{Menu, MenuItem},
     peniko::{
         Color,
@@ -48,7 +48,6 @@ use lapce_core::{
     command::{EditCommand, FocusCommand},
     directory::Directory,
     meta,
-    syntax::{Syntax, highlight::reset_highlight_configs},
 };
 use lapce_rpc::file::PathObject;
 use lsp_types::{CompletionItemKind, MessageType, ShowMessageParams};
@@ -94,7 +93,6 @@ use crate::{
     workspace::LapceWorkspace,
 };
 
-mod grammars;
 use lapce_services::logging;
 
 #[derive(Parser)]
@@ -3194,67 +3192,6 @@ pub fn launch() {
                 app_data.reload_config();
             }
         });
-    }
-
-    {
-        let cx = Scope::new();
-        let app_data = app_data.clone();
-        let send = create_ext_action(cx, move |updated| {
-            if updated {
-                trace!(
-                    TraceLevel::INFO,
-                    "grammar or query got updated, reset highlight configs"
-                );
-                reset_highlight_configs();
-                for (_, window) in app_data.windows.get_untracked() {
-                    let session = window.session.get_untracked();
-                    for (_, doc) in session.main_split.docs.get_untracked() {
-                        doc.syntax.update(|syntax| {
-                            *syntax = Syntax::from_language(syntax.language);
-                        });
-                        doc.trigger_syntax_change(None);
-                    }
-                }
-            }
-        });
-        std::thread::Builder::new()
-            .name("FindGrammar".to_owned())
-            .spawn(move || {
-                use self::grammars::*;
-                let updated = match find_grammar_release() {
-                    Ok(release) => {
-                        let mut updated = false;
-                        match fetch_grammars(&release) {
-                            Err(e) => {
-                                trace!(
-                                    TraceLevel::ERROR,
-                                    "failed to fetch grammars: {e}"
-                                );
-                            }
-                            Ok(u) => updated |= u,
-                        }
-                        match fetch_queries(&release) {
-                            Err(e) => {
-                                trace!(
-                                    TraceLevel::ERROR,
-                                    "failed to fetch grammars: {e}"
-                                );
-                            }
-                            Ok(u) => updated |= u,
-                        }
-                        updated
-                    }
-                    Err(e) => {
-                        trace!(
-                            TraceLevel::ERROR,
-                            "failed to obtain release info: {e}"
-                        );
-                        false
-                    }
-                };
-                send(updated);
-            })
-            .unwrap();
     }
 
     #[cfg(feature = "updater")]
