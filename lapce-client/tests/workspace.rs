@@ -25,7 +25,7 @@ fn request(connection: &BackendConnection, request: ProxyRequest) -> ProxyRespon
 fn connect(path: &Path) -> BackendConnection {
     BackendConnection::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: Some(path.to_owned()),
+            path: path.to_owned(),
             ..Default::default()
         },
         ..Default::default()

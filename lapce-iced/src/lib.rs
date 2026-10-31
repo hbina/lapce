@@ -33,7 +33,12 @@ enum Message {
 }
 impl Browser {
     fn new(options: worker::Options) -> Self {
-        let path_input = options.path.display().to_string();
+        let path_input = options
+            .files
+            .first()
+            .unwrap_or(&options.root)
+            .display()
+            .to_string();
         let (commands, events, thread) = worker::spawn(options);
         Self {
             worker: Some(thread),
@@ -144,6 +149,13 @@ impl Browser {
                     .width(Length::Fill),
             );
         }
+        let mut open_files = row![].spacing(4);
+        for path in &self.snapshot.open_files {
+            open_files = open_files.push(
+                button(text(path.to_string_lossy().into_owned()))
+                    .on_press(Message::Send(Command::Open(path.clone()))),
+            );
+        }
         let mut results = column![text(&self.snapshot.diagnostics)].spacing(4);
         for (path, line, label) in &self.snapshot.results {
             results = results.push(
@@ -177,6 +189,9 @@ impl Browser {
                         .on_press(Message::Navigate(worker::Navigation::Symbols))
                 ]
                 .spacing(8),
+                scrollable(open_files).direction(scrollable::Direction::Horizontal(
+                    scrollable::Scrollbar::new()
+                )),
                 row![
                     scrollable(files).width(240).height(Length::Fill),
                     text_editor(&self.content)
@@ -225,7 +240,7 @@ pub fn launch() -> Result<(), Box<dyn std::error::Error>> {
         .any(|arg| arg == "--help" || arg == "-h")
     {
         println!(
-            "Usage: lapce-iced [--proxy EXECUTABLE | --socket SOCKET] [--lsp RUST_ANALYZER] [FILE_OR_DIRECTORY]"
+            "Usage: lapce-iced [--proxy EXECUTABLE | --socket SOCKET] [--lsp RUST_ANALYZER] [FILE_OR_DIRECTORY]..."
         );
         return Ok(());
     }

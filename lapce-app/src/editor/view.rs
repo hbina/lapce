@@ -1558,15 +1558,10 @@ fn editor_breadcrumbs(
                     dyn_stack(
                         move || {
                             let full_path = doc_path.get().unwrap_or_default();
-                            let mut path = full_path;
-                            if let Some(workspace_path) =
-                                workspace.clone().path.as_ref()
-                            {
-                                path = path
-                                    .strip_prefix(workspace_path)
-                                    .unwrap_or(&path)
-                                    .to_path_buf();
-                            }
+                            let path = full_path
+                                .strip_prefix(&workspace.path)
+                                .unwrap_or(&full_path)
+                                .to_path_buf();
                             path.ancestors()
                                 .filter_map(|path| {
                                     Some(

@@ -53,13 +53,10 @@ fn file_diffs_view(source_control: SourceControlData) -> impl View {
         let full_path = path.clone();
         let path_for_click = full_path.clone();
 
-        let path = if let Some(workspace_path) = workspace.path.as_ref() {
-            path.strip_prefix(workspace_path)
-                .unwrap_or(&full_path)
-                .to_path_buf()
-        } else {
-            path
-        };
+        let path = path
+            .strip_prefix(&workspace.path)
+            .unwrap_or(&full_path)
+            .to_path_buf();
         let file_name = path
             .file_name()
             .and_then(|s| s.to_str())

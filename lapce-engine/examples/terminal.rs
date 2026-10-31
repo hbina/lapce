@@ -214,7 +214,10 @@ fn main() -> Result<()> {
     };
     let connection = BackendConnection::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: path.parent().map(PathBuf::from),
+            path: path
+                .parent()
+                .ok_or_else(|| anyhow!("file has no parent folder"))?
+                .to_path_buf(),
             ..Default::default()
         },
         local_backend,

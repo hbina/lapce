@@ -88,7 +88,18 @@ impl ProxyHandler for Dispatcher {
                 language_server_configurations,
                 ..
             } => {
-                self.workspace = workspace;
+                if workspace.as_os_str().is_empty() {
+                    tracing::error!(
+                        "Backend initialization requires a file or folder path"
+                    );
+                    return;
+                }
+                let root = if workspace.is_file() {
+                    workspace.parent().unwrap_or(&workspace).to_path_buf()
+                } else {
+                    workspace
+                };
+                self.workspace = Some(root);
                 self.file_watcher.notify(FileWatchNotifier::new(
                     self.workspace.clone(),
                     self.core_rpc.clone(),

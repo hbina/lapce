@@ -272,15 +272,7 @@ impl WindowTabData {
         let cx = cx.create_child();
         let db: Arc<LapceDb> = use_context().unwrap();
 
-        let workspace_info = if workspace.path.is_some() {
-            db.get_workspace_info(&workspace).ok()
-        } else {
-            let mut info = db.get_workspace_info(&workspace).ok();
-            if let Some(info) = info.as_mut() {
-                info.split.children.clear();
-            }
-            info
-        };
+        let workspace_info = db.get_workspace_info(&workspace).ok();
 
         let config = LapceConfig::load(&workspace);
         let lapce_command = Listener::new_empty(cx);
@@ -610,9 +602,7 @@ impl WindowTabData {
                     let mut options = FileDialogOptions::new()
                         .title("Choose a folder")
                         .select_directories();
-                    options = if let Some(parent) =
-                        self.workspace.path.as_ref().and_then(|x| x.parent())
-                    {
+                    options = if let Some(parent) = self.workspace.path.parent() {
                         options.force_starting_directory(parent)
                     } else {
                         options
@@ -621,12 +611,12 @@ impl WindowTabData {
                         if let Some(mut file) = file {
                             let workspace = LapceWorkspace {
                                 kind: LapceWorkspaceType::Local,
-                                path: Some(if let Some(path) = file.path.pop() {
+                                path: if let Some(path) = file.path.pop() {
                                     path
                                 } else {
                                     tracing::error!("No path");
                                     return;
-                                }),
+                                },
                             };
                             window_command.send(WindowCommand::OpenRootWindow {
                                 root: workspace,
@@ -781,12 +771,6 @@ impl WindowTabData {
                 }
             }
 
-            NewWindow => {
-                self.common
-                    .window_common
-                    .window_command
-                    .send(WindowCommand::NewWindow);
-            }
             CloseWindow => {
                 self.common
                     .window_common
@@ -2093,7 +2077,7 @@ impl WindowTabData {
                 WindowCommand::OpenRootWindow {
                     root: LapceWorkspace {
                         kind: self.workspace.kind.clone(),
-                        path: Some(folder.path.clone()),
+                        path: folder.path.clone(),
                     },
                 },
             );

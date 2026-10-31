@@ -12,7 +12,7 @@ fn save_as_cannot_create_or_overwrite_files_or_register_buffers() {
     std::fs::write(&existing, "original🌍").unwrap();
     let connection = BackendConnection::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: Some(directory.path().into()),
+            path: directory.path().into(),
             ..Default::default()
         },
         ..Default::default()

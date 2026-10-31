@@ -192,7 +192,7 @@ mod tests {
         // Mimicking load
         let workspace = LapceWorkspace::default();
 
-        let config = LapceConfig::merge_config(&workspace, None, None);
+        let config = LapceConfig::merge_config(Some(&workspace), None, None);
         let mut lapce_config: LapceConfig = config.try_deserialize().unwrap();
 
         let test_theme_str = r##"
@@ -228,7 +228,7 @@ color-preference = "dark"
         // lapce_config.available_icon_themes = Some(vec![]);
         lapce_config.core.color_theme = "test".to_string();
 
-        lapce_config.resolve_theme(&workspace);
+        lapce_config.resolve_theme(Some(&workspace));
 
         println!("Hot Pink: {:?}", css::HOT_PINK);
         // test basic override

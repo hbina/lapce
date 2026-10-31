@@ -38,7 +38,10 @@ fn exercise_remote(
     let connection = BackendConnection::connect(ConnectionOptions {
         workspace: LapceWorkspace {
             kind,
-            path: path.parent().map(PathBuf::from),
+            path: path
+                .parent()
+                .expect("remote file has a parent")
+                .to_path_buf(),
             ..Default::default()
         },
         remote_backend_executable,

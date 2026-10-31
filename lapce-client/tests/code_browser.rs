@@ -16,7 +16,7 @@ fn backend_browses_files_but_rejects_edits_saves_resources_and_debugging() {
     std::fs::write(&path, "original🌍").unwrap();
     let connection = BackendConnection::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: Some(directory.path().into()),
+            path: directory.path().into(),
             ..Default::default()
         },
         ..Default::default()

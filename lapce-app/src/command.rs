@@ -349,10 +349,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Restart Backend")]
     RestartBackend,
 
-    #[strum(message = "New Window")]
-    #[strum(serialize = "new_window")]
-    NewWindow,
-
     #[strum(message = "Close Window")]
     #[strum(serialize = "close_window")]
     CloseWindow,
@@ -718,7 +714,6 @@ pub enum InternalCommand {
 pub enum WindowCommand {
     OpenRootWindow { root: LapceWorkspace },
     ReloadRoot,
-    NewWindow,
     CloseWindow,
 }
 
@@ -729,6 +724,7 @@ mod code_browser_tests {
     #[test]
     fn workspace_management_commands_are_removed_but_root_navigation_remains() {
         for name in [
+            "new_window",
             "new_window_tab",
             "close_window_tab",
             "next_window_tab",
@@ -741,7 +737,6 @@ mod code_browser_tests {
         for name in [
             "open_folder",
             "open_file",
-            "new_window",
             "restart_backend",
             "palette.workspace_symbol",
         ] {

@@ -14,12 +14,14 @@ folder. There is no automatic window reuse or detached relaunch, and no `--wait`
 Each window has exactly one root folder and one backend session. There are no
 workspace tabs, workspace switching, or recent-workspace lists.
 
-A Floem invocation with multiple paths opens one window. A single folder argument
+Both frontends accept multiple paths and open one window. A single folder argument
 sets its root. Multiple files or folders use their common parent directory; files
-open as editor tabs and directories are browsable in the explorer. For example:
+open as editor tabs in Floem or in the open-file row in iced. Directories are
+browsable in the explorer. For example:
 
 ```sh
 cargo run --bin lapce-floem -- Cargo.toml README.md lapce-app lapce-core
+cargo run --bin lapce-iced -- Cargo.toml README.md lapce-app lapce-core
 ```
 
 The repository directory becomes the root, and both files open in that window.

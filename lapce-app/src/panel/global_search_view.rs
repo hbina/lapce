@@ -132,14 +132,10 @@ fn search_result(
                 move |(path, _)| path.to_owned(),
                 move |(path, match_data)| {
                     let full_path = path.clone();
-                    let path = if let Some(workspace_path) = workspace.path.as_ref()
-                    {
-                        path.strip_prefix(workspace_path)
-                            .unwrap_or(&full_path)
-                            .to_path_buf()
-                    } else {
-                        path
-                    };
+                    let path = path
+                        .strip_prefix(&workspace.path)
+                        .unwrap_or(&full_path)
+                        .to_path_buf();
                     let style_path = path.clone();
 
                     let file_name = path

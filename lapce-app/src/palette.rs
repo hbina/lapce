@@ -340,7 +340,7 @@ impl PaletteData {
     pub fn placeholder_text(&self) -> &'static str {
         match self.kind.get() {
             PaletteKind::SshHost => {
-                "Type [user@]host[:port] to open a remote window"
+                "Type [user@]host[:port] /absolute/folder to open a remote window"
             }
             PaletteKind::DiffFiles => {
                 if self.left_diff_path.with(Option::is_some) {
@@ -535,15 +535,10 @@ impl PaletteData {
                     .into_iter()
                     .map(|full_path| {
                         // Strip the workspace prefix off the path, to avoid clutter
-                        let path =
-                            if let Some(workspace_path) = workspace.path.as_ref() {
-                                full_path
-                                    .strip_prefix(workspace_path)
-                                    .unwrap_or(&full_path)
-                                    .to_path_buf()
-                            } else {
-                                full_path.clone()
-                            };
+                        let path = full_path
+                            .strip_prefix(&workspace.path)
+                            .unwrap_or(&full_path)
+                            .to_path_buf();
                         let filter_text = path.to_string_lossy().into_owned();
                         PaletteItem {
                             content: PaletteItemContent::File { path, full_path },
@@ -676,13 +671,10 @@ impl PaletteData {
             .into_iter()
             .map(|l| {
                 let full_path = l.path.clone();
-                let mut path = l.path.clone();
-                if let Some(workspace_path) = self.workspace.path.as_ref() {
-                    path = path
-                        .strip_prefix(workspace_path)
-                        .unwrap_or(&full_path)
-                        .to_path_buf();
-                }
+                let path = full_path
+                    .strip_prefix(&self.workspace.path)
+                    .unwrap_or(&full_path)
+                    .to_path_buf();
                 let filter_text = path.to_str().unwrap_or("").to_string();
                 PaletteItem {
                     content: PaletteItemContent::Reference { path, location: l },
@@ -1058,7 +1050,7 @@ impl PaletteData {
                     let kind = self.workspace.kind.clone();
                     let workspace = LapceWorkspace {
                         kind,
-                        path: Some(full_path.clone()),
+                        path: full_path.clone(),
                     };
                     self.common
                         .window_common
@@ -1204,12 +1196,20 @@ impl PaletteData {
             }
         } else if self.kind.get_untracked() == PaletteKind::SshHost {
             let input = self.input.with_untracked(|input| input.input.clone());
-            let ssh = SshHost::from_string(&input);
+            let Some((host, path)) = input.trim().split_once(char::is_whitespace)
+            else {
+                return;
+            };
+            let path = PathBuf::from(path.trim());
+            if !path.is_absolute() {
+                return;
+            }
+            let ssh = SshHost::from_string(host);
             self.common.window_common.window_command.send(
                 WindowCommand::OpenRootWindow {
                     root: LapceWorkspace {
                         kind: LapceWorkspaceType::RemoteSSH(ssh),
-                        path: None,
+                        path,
                     },
                 },
             );

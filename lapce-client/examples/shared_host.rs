@@ -34,7 +34,7 @@ fn main() -> anyhow::Result<()> {
     listener.set_nonblocking(true)?;
     let host = SharedBackend::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: Some(workspace),
+            path: workspace,
             ..Default::default()
         },
         local_backend: LocalBackend::Process { executable },

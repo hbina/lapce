@@ -10,21 +10,25 @@ use std::{ffi::OsString, path::PathBuf, sync::mpsc, time::Duration};
 
 #[derive(Clone)]
 pub struct Options {
-    pub path: PathBuf,
+    pub root: PathBuf,
+    pub files: Vec<PathBuf>,
     pub backend: LocalBackend,
     pub lsp: Option<PathBuf>,
 }
 impl Options {
     pub fn parse(mut args: impl Iterator<Item = OsString>) -> Result<Self, String> {
         let mut backend = LocalBackend::default();
-        let mut path = None;
+        let mut paths = Vec::new();
+        let mut positional_only = false;
         let mut lsp = None;
         while let Some(arg) = args.next() {
-            if arg == "--lsp" {
+            if !positional_only && arg == "--" {
+                positional_only = true;
+            } else if !positional_only && arg == "--lsp" {
                 lsp = Some(PathBuf::from(
                     args.next().ok_or("Expected language server executable")?,
                 ));
-            } else if arg == "--proxy" || arg == "--socket" {
+            } else if !positional_only && (arg == "--proxy" || arg == "--socket") {
                 let value =
                     PathBuf::from(args.next().ok_or("Expected backend path")?);
                 backend = if arg == "--socket" {
@@ -32,20 +36,47 @@ impl Options {
                 } else {
                     LocalBackend::Process { executable: value }
                 };
-            } else if arg.to_string_lossy().starts_with('-') || path.is_some() {
-                return Err("Usage: lapce-iced [--proxy EXECUTABLE | --socket SOCKET] [--lsp RUST_ANALYZER] [FILE_OR_DIRECTORY]".into());
+            } else if !positional_only && arg.to_string_lossy().starts_with('-') {
+                return Err("Usage: lapce-iced [--proxy EXECUTABLE | --socket SOCKET] [--lsp RUST_ANALYZER] [FILE_OR_DIRECTORY]...".into());
             } else {
-                path = Some(PathBuf::from(arg));
+                paths.push(PathBuf::from(arg));
             }
         }
         let cwd = std::env::current_dir().map_err(|e| e.to_string())?;
-        let path = path.unwrap_or_else(|| cwd.clone());
-        Ok(Self {
-            path: if path.is_absolute() {
-                path
+        let paths: Vec<_> = paths
+            .into_iter()
+            .map(|path| {
+                if path.is_absolute() {
+                    path
+                } else {
+                    cwd.join(path)
+                }
+            })
+            .collect();
+        let mut roots = paths.iter().map(|path| {
+            if path.is_dir() {
+                path.as_path()
             } else {
-                cwd.join(path)
-            },
+                path.parent().unwrap_or(path)
+            }
+        });
+        let mut root = roots.next().map(PathBuf::from).unwrap_or(cwd);
+        for path in roots {
+            while !path.starts_with(&root) {
+                if !root.pop() {
+                    break;
+                }
+            }
+        }
+        let mut files = Vec::new();
+        for path in paths {
+            if !path.is_dir() && !files.contains(&path) {
+                files.push(path);
+            }
+        }
+        Ok(Self {
+            root,
+            files,
             backend,
             lsp,
         })
@@ -78,6 +109,7 @@ pub struct Snapshot {
     pub content: String,
     pub revision: u64,
     pub entries: Vec<DirectoryEntry>,
+    pub open_files: Vec<PathBuf>,
     pub status: String,
     pub detail: String,
     pub jump: Option<(u64, usize)>,
@@ -108,18 +140,10 @@ fn run(
     input: mpsc::Receiver<Command>,
     output: &mpsc::SyncSender<Result<Snapshot, String>>,
 ) -> Result<(), String> {
-    let directory = if options.path.is_dir() {
-        options.path.clone()
-    } else {
-        options
-            .path
-            .parent()
-            .ok_or("File has no parent")?
-            .to_path_buf()
-    };
+    let directory = options.root;
     let connection = BackendConnection::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: Some(directory.clone()),
+            path: directory.clone(),
             ..Default::default()
         },
         local_backend: options.backend,
@@ -127,13 +151,13 @@ fn run(
         ..Default::default()
     })
     .map_err(|e| e.to_string())?;
-    let result = serve(&connection, options.path, directory, input, output);
+    let result = serve(&connection, options.files, directory, input, output);
     let shutdown = connection.shutdown_and_wait().map_err(|e| e.to_string());
     result.and(shutdown)
 }
 fn serve(
     connection: &BackendConnection,
-    initial: PathBuf,
+    initial: Vec<PathBuf>,
     directory: PathBuf,
     input: mpsc::Receiver<Command>,
     output: &mpsc::SyncSender<Result<Snapshot, String>>,
@@ -148,8 +172,12 @@ fn serve(
         ..Default::default()
     };
     snapshot.entries = session.list_directory(directory)?;
-    if !initial.is_dir() {
-        open(&mut session, &mut snapshot, initial)?;
+    let first = initial.first().cloned();
+    for path in initial {
+        open(&mut session, &mut snapshot, path)?;
+    }
+    if let Some(path) = first {
+        open(&mut session, &mut snapshot, path)?;
     }
     output
         .send(Ok(snapshot.clone()))
@@ -210,8 +238,8 @@ fn serve(
                 .map_err(|e| e.to_string())?;
         }
     }
-    if session.document(&snapshot.path).is_some() {
-        session.close(&snapshot.path)?;
+    for path in &snapshot.open_files {
+        session.close(path)?;
     }
     Ok(())
 }
@@ -227,8 +255,8 @@ fn open(
     };
     if snapshot.path != path {
         session.open(path.clone())?;
-        if session.document(&snapshot.path).is_some() {
-            session.close(&snapshot.path)?;
+        if !snapshot.open_files.contains(&path) {
+            snapshot.open_files.push(path.clone());
         }
         snapshot.path = path;
     }
@@ -407,6 +435,79 @@ mod tests {
         }
     }
 
+    #[test]
+    fn mixed_paths_keep_every_file_and_choose_one_common_root() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.toml");
+        let folder = directory.path().join("nested");
+        let second = folder.join("second.rs");
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(&first, "first").unwrap();
+        std::fs::write(&second, "second").unwrap();
+        let options = Options::parse(
+            [
+                first.as_os_str().to_owned(),
+                folder.as_os_str().to_owned(),
+                second.as_os_str().to_owned(),
+                first.as_os_str().to_owned(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        assert_eq!(options.root, directory.path());
+        assert_eq!(options.files, vec![first, second]);
+
+        let relative = Options::parse(
+            ["Cargo.toml", "README.md"].into_iter().map(OsString::from),
+        )
+        .unwrap();
+        let cwd = std::env::current_dir().unwrap();
+        assert_eq!(relative.root, cwd);
+        assert_eq!(
+            relative.files,
+            vec![cwd.join("Cargo.toml"), cwd.join("README.md")]
+        );
+        let escaped =
+            Options::parse(["--", "--file.rs"].into_iter().map(OsString::from))
+                .unwrap();
+        assert_eq!(escaped.files, vec![cwd.join("--file.rs")]);
+    }
+
+    #[test]
+    #[cfg(feature = "embedded-backend")]
+    fn multiple_cli_files_open_in_one_session_and_remain_available() {
+        let directory = tempfile::tempdir().unwrap();
+        let first = directory.path().join("first.rs");
+        let second = directory.path().join("second.rs");
+        std::fs::write(&first, "first content").unwrap();
+        std::fs::write(&second, "second content").unwrap();
+        let options = Options::parse(
+            [
+                first.as_os_str().to_owned(),
+                directory.path().as_os_str().to_owned(),
+                second.as_os_str().to_owned(),
+            ]
+            .into_iter(),
+        )
+        .unwrap();
+        let (commands, events, thread) = spawn(options);
+        let loaded = receive_until(&events, |snapshot| snapshot.path == first);
+        assert_eq!(loaded.directory, directory.path());
+        assert_eq!(loaded.content, "first content");
+        assert_eq!(loaded.open_files, vec![first.clone(), second.clone()]);
+        commands.send(Command::Open(second.clone())).unwrap();
+        let selected = receive_until(&events, |snapshot| snapshot.path == second);
+        assert_eq!(selected.content, "second content");
+        assert_eq!(selected.open_files, loaded.open_files);
+        commands.send(Command::Open(first.clone())).unwrap();
+        let selected = receive_until(&events, |snapshot| snapshot.path == first);
+        assert_eq!(selected.content, "first content");
+        assert_eq!(selected.open_files, loaded.open_files);
+        drop(commands);
+        drop(events);
+        thread.join().unwrap();
+    }
+
     fn receive_until(
         events: &mpsc::Receiver<Result<Snapshot, String>>,
         mut predicate: impl FnMut(&Snapshot) -> bool,
@@ -447,7 +548,8 @@ mod tests {
         std::fs::write(directory.path().join("Cargo.toml"), "[package]\nname = \"iced_fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[lib]\npath = \"source 🌍.rs\"\n").unwrap();
         let lsp = std::env::var_os("LAPCE_TEST_LSP").map(PathBuf::from);
         let (commands, events, thread) = spawn(Options {
-            path: path.clone(),
+            root: directory.path().into(),
+            files: vec![path.clone()],
             backend,
             lsp: lsp.clone(),
         });

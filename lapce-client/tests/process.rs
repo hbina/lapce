@@ -36,7 +36,7 @@ fn remote_launcher_serves_real_backend_requests_over_stdio_queues() {
     let path = directory.path().join("remote source.rs");
     std::fs::write(&path, "remote🌍\n").unwrap();
     let rpc = ProxyRpcHandler::new();
-    rpc.initialize(Some(directory.path().into()), Default::default());
+    rpc.initialize(directory.path().into(), Default::default());
     let driver_rpc = rpc.clone();
     let worker = std::thread::spawn(move || {
         start_remote(
@@ -78,7 +78,7 @@ fn shared_queues_deliver_disk_events_and_acknowledge_each_frontend_revision() {
     std::fs::write(&path, original).unwrap();
     let host = SharedBackend::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: Some(directory.path().into()),
+            path: directory.path().into(),
             ..Default::default()
         },
         local_backend: LocalBackend::Process {
@@ -173,6 +173,10 @@ fn shared_queues_deliver_disk_events_and_acknowledge_each_frontend_revision() {
 fn missing_backend_reports_failure_and_releases_requests() {
     let directory = tempfile::tempdir().unwrap();
     let connection = BackendConnection::connect(ConnectionOptions {
+        workspace: lapce_client::workspace::LapceWorkspace {
+            path: directory.path().into(),
+            ..Default::default()
+        },
         local_backend: LocalBackend::Process {
             executable: directory.path().join("missing-backend"),
         },
@@ -233,18 +237,21 @@ fn missing_backend_reports_failure_and_releases_requests() {
 fn real_process_browses_workspace_and_enforces_read_only() {
     let executable = std::env::var_os("LAPCE_TEST_PROXY")
         .expect("set LAPCE_TEST_PROXY to the backend executable");
-    assert_workspace_browser(LocalBackend::Process {
-        executable: executable.into(),
-    });
+    assert_workspace_browser(
+        LocalBackend::Process {
+            executable: executable.into(),
+        },
+        false,
+    );
 }
 
 #[test]
 #[cfg(feature = "embedded-backend")]
 fn embedded_pipe_browses_workspace_and_shuts_down() {
-    assert_workspace_browser(LocalBackend::Embedded);
+    assert_workspace_browser(LocalBackend::Embedded, false);
 }
 
-fn assert_workspace_browser(backend: LocalBackend) {
+fn assert_workspace_browser(backend: LocalBackend, file_target: bool) {
     use lapce_client::workspace::LapceWorkspace;
     use lapce_rpc::{
         buffer::BufferId,
@@ -256,7 +263,11 @@ fn assert_workspace_browser(backend: LocalBackend) {
     std::fs::write(&path, text).unwrap();
     let connection = BackendConnection::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: Some(directory.path().into()),
+            path: if file_target {
+                path.clone()
+            } else {
+                directory.path().into()
+            },
             ..Default::default()
         },
         local_backend: backend,
@@ -315,7 +326,7 @@ fn assert_managed_restart(backend: LocalBackend) {
     std::fs::write(&path, "before🌍").unwrap();
     let connection = ManagedBackend::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: Some(directory.path().into()),
+            path: directory.path().into(),
             ..Default::default()
         },
         local_backend: backend,
@@ -403,7 +414,7 @@ fn two_frontends_share_one_process_and_close_buffers_independently() {
     std::fs::write(&path, "shared🌍 needle").unwrap();
     let host = SharedBackend::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: Some(directory.path().into()),
+            path: directory.path().into(),
             ..Default::default()
         },
         local_backend: LocalBackend::Process {
@@ -544,7 +555,7 @@ fn socket_frontends_share_backend_and_disconnect_independently() {
     let host = Arc::new(
         SharedBackend::connect(ConnectionOptions {
             workspace: LapceWorkspace {
-                path: Some(directory.path().into()),
+                path: directory.path().into(),
                 ..Default::default()
             },
             local_backend: LocalBackend::Process {
@@ -570,6 +581,10 @@ fn socket_frontends_share_backend_and_disconnect_independently() {
     });
     let connect = || {
         BackendConnection::connect(ConnectionOptions {
+            workspace: lapce_client::workspace::LapceWorkspace {
+                path: directory.path().into(),
+                ..Default::default()
+            },
             local_backend: LocalBackend::SharedSocket {
                 path: socket.clone(),
             },
@@ -617,4 +632,24 @@ fn socket_frontends_share_backend_and_disconnect_independently() {
         .unwrap()
         .shutdown_and_wait()
         .unwrap();
+}
+
+#[test]
+fn frontend_must_supply_a_nonempty_backend_path() {
+    let path = std::path::PathBuf::new();
+    let result = BackendConnection::connect(ConnectionOptions {
+        workspace: lapce_client::workspace::LapceWorkspace {
+            path,
+            ..Default::default()
+        },
+        ..Default::default()
+    });
+    let error = result.err().expect("pathless connection must fail");
+    assert!(error.to_string().contains("frontend must provide"));
+}
+
+#[test]
+#[cfg(feature = "embedded-backend")]
+fn file_target_uses_its_parent_for_backend_search() {
+    assert_workspace_browser(LocalBackend::Embedded, true);
 }

@@ -14,7 +14,7 @@ fn shared_frontends_reload_one_external_disk_change_independently() {
     std::fs::write(&path, "before🌍").unwrap();
     let host = lapce_client::shared::SharedBackend::connect(ConnectionOptions {
         workspace: LapceWorkspace {
-            path: Some(directory.path().into()),
+            path: directory.path().into(),
             ..Default::default()
         },
         local_backend: LocalBackend::Process {
@@ -78,7 +78,7 @@ fn reconnect_to_real_process_refreshes_read_only_file_and_preserves_identity() {
     let connect = || {
         BackendConnection::connect(ConnectionOptions {
             workspace: LapceWorkspace {
-                path: Some(directory.path().into()),
+                path: directory.path().into(),
                 ..Default::default()
             },
             local_backend: LocalBackend::Process {

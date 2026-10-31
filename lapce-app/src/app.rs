@@ -114,7 +114,7 @@ struct Cli {
 #[derive(Clone)]
 pub enum AppCommand {
     SaveApp,
-    NewWindow { root: Option<LapceWorkspace> },
+    NewWindow { root: LapceWorkspace },
     CloseWindow(WindowId),
     WindowGotFocus(WindowId),
     WindowClosed(WindowId),
@@ -156,7 +156,7 @@ fn cli_window_paths(paths: &[PathObject]) -> (LapceWorkspace, Vec<PathObject>) {
     let files = paths.iter().filter(|path| !path.is_dir).cloned().collect();
     (
         LapceWorkspace {
-            path: Some(root),
+            path: root,
             ..Default::default()
         },
         files,
@@ -165,7 +165,7 @@ fn cli_window_paths(paths: &[PathObject]) -> (LapceWorkspace, Vec<PathObject>) {
 
 impl AppData {
     pub fn reload_config(&self) {
-        let config = LapceConfig::load(&LapceWorkspace::default());
+        let config = LapceConfig::load_global();
 
         self.config.set(Arc::new(config));
         self.window_scale.set(self.config.get().ui.scale());
@@ -191,7 +191,7 @@ impl AppData {
             .title("Lapce")
     }
 
-    pub fn new_window(&self, root: Option<LapceWorkspace>) {
+    pub fn new_window(&self, root: LapceWorkspace) {
         let config = self
             .active_window()
             .map(|window| {
@@ -215,7 +215,6 @@ impl AppData {
         } else {
             config
         };
-        let root = root.unwrap_or_else(|| cli_window_paths(&[]).0);
         let app_data = self.clone();
         floem::new_window(
             move |window_id| {
@@ -504,10 +503,10 @@ impl AppData {
                 if let Event::DroppedFile(file) = event {
                     if file.path.is_dir() {
                         app_command.send(AppCommand::NewWindow {
-                            root: Some(LapceWorkspace {
-                                path: Some(file.path.clone()),
+                            root: LapceWorkspace {
+                                path: file.path.clone(),
                                 ..Default::default()
-                            }),
+                            },
                         });
                     } else {
                         let win_tab_data = window_data.session.get_untracked();
@@ -2220,13 +2219,10 @@ fn palette_item(
 
             let path = location.path.clone();
             let full_path = location.path.clone();
-            let path = if let Some(workspace_path) = workspace.path.as_ref() {
-                path.strip_prefix(workspace_path)
-                    .unwrap_or(&full_path)
-                    .to_path_buf()
-            } else {
-                path
-            };
+            let path = path
+                .strip_prefix(&workspace.path)
+                .unwrap_or(&full_path)
+                .to_path_buf();
 
             let hint = path.to_string_lossy().to_string();
             let text_indices: Vec<usize> = item
@@ -3067,12 +3063,8 @@ fn window(window_data: WindowData) -> impl View {
 
     floem::views::dyn_container(move || session.get(), window_tab)
         .window_title(move || {
-            session
-                .get()
-                .workspace
-                .display()
-                .map(|root| format!("{root} - Lapce"))
-                .unwrap_or_else(|| "Lapce".into())
+            let root = session.get().workspace.display();
+            format!("{root} - Lapce")
         })
         .on_event_stop(EventListener::ImeEnabled, move |_| {
             ime_enabled.set(true);
@@ -3173,7 +3165,7 @@ pub fn launch() {
     }
 
     let windows = scope.create_rw_signal(im::HashMap::new());
-    let config = LapceConfig::load(&LapceWorkspace::default());
+    let config = LapceConfig::load_global();
 
     // Restore scale from config
     window_scale.set(config.ui.scale());
@@ -3311,7 +3303,7 @@ pub fn launch() {
             has_visible_windows,
         } => {
             if !has_visible_windows {
-                app_data.new_window(None);
+                app_data.new_window(cli_window_paths(&[]).0);
             }
         }
     })
@@ -3544,11 +3536,11 @@ mod cli_tests {
             ),
         ] {
             let (root, files) = cli_window_paths(&paths);
-            assert_eq!(root.path, Some(PathBuf::from(expected)));
+            assert_eq!(root.path, PathBuf::from(expected));
             assert!(files.is_empty());
         }
         let (root, files) = cli_window_paths(&[]);
-        assert_eq!(root.path, Some(std::env::current_dir().unwrap()));
+        assert_eq!(root.path, std::env::current_dir().unwrap());
         assert!(files.is_empty());
     }
 
@@ -3628,11 +3620,11 @@ mod cli_tests {
         )
         .unwrap();
         let (root, opened_files) = cli_window_paths(&cli.paths);
-        assert_eq!(root.path.as_deref(), Some(directory.path()));
+        assert_eq!(root.path.as_path(), directory.path());
         assert!(
             cli.paths
                 .iter()
-                .all(|path| path.path.starts_with(root.path.as_ref().unwrap()))
+                .all(|path| path.path.starts_with(&root.path))
         );
         assert_eq!(
             opened_files
@@ -3652,7 +3644,7 @@ mod cli_tests {
         ])
         .unwrap();
         let (root, files) = cli_window_paths(&cli.paths);
-        assert_eq!(root.path, Some(PathBuf::from("/tmp")));
+        assert_eq!(root.path, PathBuf::from("/tmp"));
         assert_eq!(files, cli.paths);
         assert_eq!(files[0].linecol.as_ref().unwrap().line, 12);
         assert_eq!(files[0].linecol.as_ref().unwrap().column, 3);

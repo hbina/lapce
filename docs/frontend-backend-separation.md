@@ -22,6 +22,11 @@ thread connected over a Unix socket pair. CLI detaching, `--wait`, `--new`, wind
 reuse, and the old desktop-routing socket have been removed. Logging is initialized
 once per process, with one queued worker writing stderr and rotating files.
 Explicit process, shared-socket, and SSH backend transports remain supported.
+Frontend connections must supply a nonempty file or folder path. The initialization
+protocol requires this path; a file target uses its parent directory as the backend
+root. The backend does not choose a default root. `LapceWorkspace.path` is a required
+`PathBuf`. The SSH connection palette accepts `[user@]host[:port] /absolute/folder`
+so the frontend supplies the remote root before opening the connection.
 See [startup and logging](startup-and-logging.md). Historical startup notes below
 that describe detached launches or iced's process default no longer apply.
 

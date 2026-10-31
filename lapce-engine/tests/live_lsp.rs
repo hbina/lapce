@@ -24,7 +24,7 @@ fn managed_replacement_restores_live_definition_navigation() {
     std::fs::write(&path, text).unwrap();
     std::fs::write(directory.path().join("Cargo.toml"), "[package]\nname = \"restart_fixture\"\nversion = \"0.1.0\"\nedition = \"2021\"\n[lib]\npath = \"lib.rs\"\n").unwrap();
     let backend = ManagedBackend::connect(ConnectionOptions {
-        workspace: LapceWorkspace { path: Some(directory.path().into()), ..Default::default() },
+        workspace: LapceWorkspace { path: directory.path().into(), ..Default::default() },
         local_backend: LocalBackend::Process { executable: std::env::var_os("LAPCE_TEST_PROXY").expect("set LAPCE_TEST_PROXY").into() },
         language_server_configurations: HashMap::from([("lapce-native-lsp".into(), HashMap::from([("servers".into(), serde_json::json!([{
             "language": "rust", "executable": std::path::PathBuf::from(std::env::var_os("LAPCE_TEST_LSP").expect("set LAPCE_TEST_LSP")),
@@ -109,7 +109,7 @@ fn real_language_server_provides_read_only_navigation_and_diagnostics() {
     let text = "pub fn answer() -> u32 { 42 }\npub fn use_answer() -> u32 { answer() }\npub fn broken() { missing(); }\n";
     std::fs::write(&path, text).unwrap();
     let host = SharedBackend::connect(ConnectionOptions {
-        workspace: LapceWorkspace { path: Some(directory.path().into()), ..Default::default() },
+        workspace: LapceWorkspace { path: directory.path().into(), ..Default::default() },
         local_backend: LocalBackend::Process { executable: proxy.into() },
         language_server_configurations: HashMap::from([("lapce-native-lsp".into(), HashMap::from([("servers".into(), serde_json::json!([{
             "language": "rust", "executable": std::path::PathBuf::from(lsp),

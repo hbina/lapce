@@ -83,6 +83,11 @@ pub struct BackendConnection {
 
 impl BackendConnection {
     pub fn connect(options: ConnectionOptions) -> Result<Self> {
+        let workspace = options.workspace.path.clone();
+        anyhow::ensure!(
+            !workspace.as_os_str().is_empty(),
+            "The frontend must provide a file or folder path"
+        );
         let proxy_rpc = ProxyRpcHandler::new();
         let core_rpc = CoreRpcHandler::new();
         let (tx, events) = mpsc::channel();
@@ -96,10 +101,8 @@ impl BackendConnection {
         let driver_proxy = proxy_rpc.clone();
         // Queue initialization before exposing the connection. Requests sent
         // immediately after connect must not overtake workspace setup.
-        driver_proxy.initialize(
-            options.workspace.path.clone(),
-            options.language_server_configurations.clone(),
-        );
+        driver_proxy
+            .initialize(workspace, options.language_server_configurations.clone());
         let driver = match std::thread::Builder::new()
             .name("Lapce backend connection".into())
             .spawn(move || {

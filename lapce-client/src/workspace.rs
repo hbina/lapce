@@ -77,12 +77,12 @@ impl std::fmt::Display for LapceWorkspaceType {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LapceWorkspace {
     pub kind: LapceWorkspaceType,
-    pub path: Option<PathBuf>,
+    pub path: PathBuf,
 }
 
 impl LapceWorkspace {
-    pub fn display(&self) -> Option<String> {
-        let path = self.path.as_ref()?;
+    pub fn display(&self) -> String {
+        let path = &self.path;
         let path = path
             .file_name()
             .unwrap_or(path.as_os_str())
@@ -94,7 +94,7 @@ impl LapceWorkspace {
                 format!(" [SSH: {}]", remote.host)
             }
         };
-        Some(format!("{path}{remote}"))
+        format!("{path}{remote}")
     }
 }
 
@@ -102,18 +102,33 @@ impl Default for LapceWorkspace {
     fn default() -> Self {
         Self {
             kind: LapceWorkspaceType::Local,
-            path: None,
+            path: std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
         }
     }
 }
 
 impl std::fmt::Display for LapceWorkspace {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "{}:{}",
-            self.kind,
-            self.path.as_ref().and_then(|p| p.to_str()).unwrap_or("")
-        )
+        write!(f, "{}:{}", self.kind, self.path.to_string_lossy())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LapceWorkspace;
+
+    #[test]
+    fn root_path_is_required_in_serialized_workspace() {
+        for value in [
+            serde_json::json!({"kind": "Local"}),
+            serde_json::json!({"kind": "Local", "path": null}),
+        ] {
+            assert!(serde_json::from_value::<LapceWorkspace>(value).is_err());
+        }
+        let root: LapceWorkspace = serde_json::from_value(serde_json::json!({
+            "kind": "Local", "path": "/code",
+        }))
+        .unwrap();
+        assert_eq!(root.path, std::path::Path::new("/code"));
     }
 }

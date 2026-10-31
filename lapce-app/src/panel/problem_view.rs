@@ -97,13 +97,10 @@ fn file_view(
     });
 
     let full_path = path.clone();
-    let path = if let Some(workspace_path) = workspace.path.as_ref() {
-        path.strip_prefix(workspace_path)
-            .unwrap_or(&full_path)
-            .to_path_buf()
-    } else {
-        path
-    };
+    let path = path
+        .strip_prefix(&workspace.path)
+        .unwrap_or(&full_path)
+        .to_path_buf();
     let style_path = path.clone();
 
     let icon = match severity {

@@ -26,7 +26,7 @@ use self::{
     terminal::TerminalConfig,
     ui::UIConfig,
 };
-use crate::workspace::{LapceWorkspace, LapceWorkspaceType};
+use crate::workspace::LapceWorkspace;
 
 pub mod color;
 pub mod color_theme;
@@ -128,6 +128,14 @@ pub struct LapceConfig {
 
 impl LapceConfig {
     pub fn load(workspace: &LapceWorkspace) -> Self {
+        Self::load_inner(Some(workspace))
+    }
+
+    pub fn load_global() -> Self {
+        Self::load_inner(None)
+    }
+
+    fn load_inner(workspace: Option<&LapceWorkspace>) -> Self {
         let config = Self::merge_config(workspace, None, None);
         let mut lapce_config: LapceConfig = match config.try_deserialize() {
             Ok(config) => config,
@@ -170,7 +178,7 @@ impl LapceConfig {
     }
 
     fn merge_config(
-        workspace: &LapceWorkspace,
+        workspace: Option<&LapceWorkspace>,
         color_theme_config: Option<config::Config>,
         icon_theme_config: Option<config::Config>,
     ) -> config::Config {
@@ -203,20 +211,13 @@ impl LapceConfig {
                 .unwrap_or_else(|_| config.clone());
         }
 
-        match workspace.kind {
-            LapceWorkspaceType::Local => {
-                if let Some(path) = workspace.path.as_ref() {
-                    let path = path.join("./.lapce/settings.toml");
-                    config = config::Config::builder()
-                        .add_source(config.clone())
-                        .add_source(
-                            config::File::from(path.as_path()).required(false),
-                        )
-                        .build()
-                        .unwrap_or_else(|_| config.clone());
-                }
-            }
-            LapceWorkspaceType::RemoteSSH(_) => {}
+        if let Some(workspace) = workspace.filter(|root| root.kind.is_local()) {
+            let path = workspace.path.join("./.lapce/settings.toml");
+            config = config::Config::builder()
+                .add_source(config.clone())
+                .add_source(config::File::from(path.as_path()).required(false))
+                .build()
+                .unwrap_or_else(|_| config.clone());
         }
 
         config
@@ -248,7 +249,7 @@ impl LapceConfig {
         default_lapce_config
     }
 
-    fn resolve_theme(&mut self, workspace: &LapceWorkspace) {
+    fn resolve_theme(&mut self, workspace: Option<&LapceWorkspace>) {
         let default_lapce_config = DEFAULT_LAPCE_CONFIG.clone();
 
         let color_theme_config = self
@@ -313,14 +314,14 @@ impl LapceConfig {
     /// Note that this does not save the config.
     pub fn set_color_theme(&mut self, workspace: &LapceWorkspace, theme: &str) {
         self.core.color_theme = theme.to_string();
-        self.resolve_theme(workspace);
+        self.resolve_theme(Some(workspace));
     }
 
     /// Set the active icon theme.
     /// Note that this does not save the config.
     pub fn set_icon_theme(&mut self, workspace: &LapceWorkspace, theme: &str) {
         self.core.icon_theme = theme.to_string();
-        self.resolve_theme(workspace);
+        self.resolve_theme(Some(workspace));
     }
 
     pub fn set_modal(&mut self, _workspace: &LapceWorkspace, modal: bool) {

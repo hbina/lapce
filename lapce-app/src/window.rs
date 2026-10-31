@@ -41,9 +41,8 @@ pub struct WindowCommonData {
 /// `WindowData` is the application model for a top-level window.
 ///
 /// A top-level window can be independently moved around and
-/// resized using your window manager. Normally Lapce has only one
-/// top-level window, but new ones can be created using the "New Window"
-/// command.
+/// resized using your window manager. Opening another folder creates
+/// another top-level window.
 ///
 /// Each window owns one root/session, its size, and its position.
 #[derive(Clone)]
@@ -70,7 +69,7 @@ impl WindowData {
         app_command: Listener<AppCommand>,
     ) -> Self {
         let cx = Scope::new();
-        let config = LapceConfig::load(&LapceWorkspace::default());
+        let config = LapceConfig::load_global();
         let config = cx.create_rw_signal(Arc::new(config));
         let root_view_id = cx.create_rw_signal(ViewId::new());
 
@@ -122,7 +121,7 @@ impl WindowData {
     }
 
     pub fn reload_config(&self) {
-        let config = LapceConfig::load(&LapceWorkspace::default());
+        let config = LapceConfig::load_global();
         self.config.set(Arc::new(config));
         self.session.get_untracked().reload_config();
     }
@@ -130,8 +129,7 @@ impl WindowData {
     pub fn run_window_command(&self, cmd: WindowCommand) {
         match cmd {
             WindowCommand::OpenRootWindow { root } => {
-                self.app_command
-                    .send(AppCommand::NewWindow { root: Some(root) });
+                self.app_command.send(AppCommand::NewWindow { root });
             }
             WindowCommand::ReloadRoot => {
                 let old = self.session.get_untracked();
@@ -147,9 +145,6 @@ impl WindowData {
                 ));
                 self.session.set(next);
                 old.scope.dispose();
-            }
-            WindowCommand::NewWindow => {
-                self.app_command.send(AppCommand::NewWindow { root: None })
             }
             WindowCommand::CloseWindow => self
                 .app_command
@@ -189,7 +184,7 @@ mod tests {
         let window: WindowInfo = serde_json::from_value(old).unwrap();
         assert_eq!(window.size, Size::new(1000.0, 700.0));
         assert_eq!(window.pos, Point::new(40.0, 50.0));
-        assert!(window.root.path.is_none());
+        assert_eq!(window.root.path, std::env::current_dir().unwrap());
         let saved = serde_json::to_value(window).unwrap();
         assert!(saved.get("tabs").is_none());
         assert!(saved["root"].get("last_open").is_none());
@@ -208,7 +203,7 @@ mod tests {
                 maximised: false,
                 root: LapceWorkspace {
                     kind,
-                    path: Some("/source".into()),
+                    path: "/source".into(),
                 },
             };
             let saved = serde_json::to_value(&window).unwrap();

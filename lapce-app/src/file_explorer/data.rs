@@ -59,7 +59,7 @@ impl KeyPressFocus for FileExplorerData {
 
 impl FileExplorerData {
     pub fn new(cx: Scope, common: Rc<CommonData>) -> Self {
-        let path = common.workspace.path.clone().unwrap_or_default();
+        let path = common.workspace.path.clone();
         let root = cx.create_rw_signal(FileNodeItem {
             path: path.clone(),
             is_dir: true,
@@ -75,10 +75,7 @@ impl FileExplorerData {
             left_diff_path: cx.create_rw_signal(None),
             select: cx.create_rw_signal(None),
         };
-        if data.common.workspace.path.is_some() {
-            // only fill in the child files if there is open folder
-            data.toggle_expand(&path);
-        }
+        data.toggle_expand(&path);
         data
     }
 
@@ -217,11 +214,6 @@ impl FileExplorerData {
         let path_a = path.to_owned();
         let left_diff_path = self.left_diff_path;
 
-        let Some(_) = self.common.workspace.path.as_ref() else {
-            // There is no context menu if we are not in a workspace
-            return;
-        };
-
         let mut menu = Menu::new("");
 
         // TODO: there are situations where we can open the file explorer to remote files
@@ -256,11 +248,7 @@ impl FileExplorerData {
         let path = path_a.clone();
         let workspace = common.workspace.clone();
         menu = menu.entry(MenuItem::new("Copy Relative Path").action(move || {
-            let relative_path = if let Some(workspace_path) = &workspace.path {
-                path.strip_prefix(workspace_path).unwrap_or(&path)
-            } else {
-                path.as_ref()
-            };
+            let relative_path = path.strip_prefix(&workspace.path).unwrap_or(&path);
 
             let mut clipboard = SystemClipboard::new();
             clipboard.put_string(relative_path.to_string_lossy());

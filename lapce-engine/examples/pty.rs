@@ -33,6 +33,10 @@ fn main() -> Result<()> {
         None
     };
     let connection = BackendConnection::connect(ConnectionOptions {
+        workspace: lapce_client::workspace::LapceWorkspace {
+            path: std::env::current_dir()?,
+            ..Default::default()
+        },
         local_backend: LocalBackend::Process { executable },
         ..Default::default()
     })?;

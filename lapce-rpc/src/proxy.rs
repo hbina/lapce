@@ -325,7 +325,7 @@ impl ProxyRequest {
 #[serde(tag = "method", content = "params")]
 pub enum ProxyNotification {
     Initialize {
-        workspace: Option<PathBuf>,
+        workspace: PathBuf,
 
         language_server_configurations:
             HashMap<String, HashMap<String, serde_json::Value>>,
@@ -743,7 +743,7 @@ impl ProxyRpcHandler {
 
     pub fn initialize(
         &self,
-        workspace: Option<PathBuf>,
+        workspace: PathBuf,
 
         language_server_configurations: HashMap<
             String,
@@ -1366,5 +1366,29 @@ mod connection_tests {
             .code,
             -32001
         );
+    }
+}
+
+#[cfg(test)]
+mod initialization_tests {
+    use super::ProxyNotification;
+
+    #[test]
+    fn initialization_requires_a_path_on_the_wire() {
+        for params in [
+            serde_json::json!({"language_server_configurations": {}}),
+            serde_json::json!({"workspace": null, "language_server_configurations": {}}),
+        ] {
+            assert!(
+                serde_json::from_value::<ProxyNotification>(serde_json::json!({
+                    "method": "initialize", "params": params,
+                }))
+                .is_err()
+            );
+        }
+        assert!(serde_json::from_value::<ProxyNotification>(serde_json::json!({
+            "method": "initialize",
+            "params": {"workspace": "/source", "language_server_configurations": {}},
+        })).is_ok());
     }
 }

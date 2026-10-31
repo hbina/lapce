@@ -214,25 +214,16 @@ fn middle(
                             .color(config.color(LapceColor::LAPCE_ICON_ACTIVE))
                     },
                 ),
-                label(move || {
-                    if let Some(s) = local_workspace.display() {
-                        s
-                    } else {
-                        "Open Folder".to_string()
-                    }
-                })
-                .style(|s| s.padding_left(10).padding_right(5).selectable(false)),
+                label(move || local_workspace.display()).style(|s| {
+                    s.padding_left(10).padding_right(5).selectable(false)
+                }),
                 open_folder(),
             ))
             .style(|s| s.align_items(Some(AlignItems::Center))),
         )
         .on_event_stop(EventListener::PointerDown, |_| {})
         .on_click_stop(move |_| {
-            if workspace.clone().path.is_some() {
-                workbench_command.send(LapceWorkbenchCommand::PaletteHelpAndFile);
-            } else {
-                workbench_command.send(LapceWorkbenchCommand::OpenFolder);
-            }
+            workbench_command.send(LapceWorkbenchCommand::PaletteHelpAndFile);
         })
         .style(move |s| {
             let config = config.get();

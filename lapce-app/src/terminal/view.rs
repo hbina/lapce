@@ -196,7 +196,7 @@ impl TerminalView {
                         .and_then(|x: &&str| x.parse::<u32>().ok())
                         .unwrap_or(0),
                 );
-                let parent_path = self.workspace.path.as_ref()?;
+                let parent_path = &self.workspace.path;
                 self.internal_command.send(InternalCommand::JumpToLocation {
                     location: EditorLocation {
                         path: parent_path.join(file),

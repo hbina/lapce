@@ -12,9 +12,3 @@ Icon=dev.lapce.lapce
 Exec=lapce-floem %F
 Terminal=false
 MimeType=text/plain;inode/directory;
-Actions=new-window;
-
-[Desktop Action new-window]
-Name=New Window
-Exec=lapce-floem %F
-Icon=dev.lapce.lapce
