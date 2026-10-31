@@ -2588,20 +2588,44 @@ impl EditorData {
         let config = self.common.config;
         let hover_data = self.common.hover.clone();
         let editor_id = self.id();
-        let send = create_ext_action(self.scope, move |resp| {
+        let doc = self.doc();
+        let source = doc.clone();
+        let scope = self.scope;
+        let send = create_ext_action(scope, move |resp| {
             if let Ok(ProxyResponse::HoverResponse { hover, .. }) = resp {
-                let content = parse_hover_resp(hover, &config.get_untracked());
+                let blocks = crate::markdown::hover_code_blocks(&hover);
+                let content =
+                    parse_hover_resp(hover.clone(), &config.get_untracked(), &[]);
                 hover_data.content.set(content);
                 hover_data.offset.set(offset);
                 hover_data.editor_id.set(editor_id);
                 hover_data.active.set(true);
+                if !blocks.is_empty() {
+                    let data = hover_data.clone();
+                    let apply = create_ext_action(scope, move |result| {
+                        if data.active.get_untracked()
+                            && data.offset.get_untracked() == offset
+                            && data.editor_id.get_untracked() == editor_id
+                            && let Ok(ProxyResponse::CodeHighlights { blocks }) =
+                                result
+                        {
+                            data.content.set(parse_hover_resp(
+                                hover,
+                                &config.get_untracked(),
+                                &blocks,
+                            ));
+                        }
+                    });
+                    source.request_document(
+                        lapce_rpc::proxy::ProxyRequest::HighlightCode { blocks },
+                        move |result| apply(result),
+                    );
+                }
             }
         });
-        self.doc().request_navigation(
+        doc.request_navigation(
             lapce_engine::navigation::NavigationQuery::Hover { offset },
-            |resp| {
-                send(resp);
-            },
+            move |resp| send(resp),
         );
     }
 
@@ -3438,19 +3462,23 @@ pub(crate) fn compute_screen_lines(
 fn parse_hover_resp(
     hover: lsp_types::Hover,
     config: &LapceConfig,
+    highlights: &[lapce_rpc::highlighting::CodeHighlights],
 ) -> Vec<MarkdownContent> {
     match hover.contents {
         HoverContents::Scalar(text) => match text {
-            MarkedString::String(text) => parse_markdown(&text, 1.8, config),
+            MarkedString::String(text) => {
+                parse_markdown(&text, 1.8, config, highlights)
+            }
             MarkedString::LanguageString(code) => parse_markdown(
                 &format!("```{}\n{}\n```", code.language, code.value),
                 1.8,
                 config,
+                highlights,
             ),
         },
         HoverContents::Array(array) => array
             .into_iter()
-            .map(|t| from_marked_string(t, config))
+            .map(|t| from_marked_string(t, config, highlights))
             .rev()
             .reduce(|mut contents, more| {
                 contents.push(MarkdownContent::Separator);
@@ -3460,7 +3488,9 @@ fn parse_hover_resp(
             .unwrap_or_default(),
         HoverContents::Markup(content) => match content.kind {
             MarkupKind::PlainText => from_plaintext(&content.value, 1.8, config),
-            MarkupKind::Markdown => parse_markdown(&content.value, 1.8, config),
+            MarkupKind::Markdown => {
+                parse_markdown(&content.value, 1.8, config, highlights)
+            }
         },
     }
 }

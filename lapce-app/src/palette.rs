@@ -23,7 +23,6 @@ use itertools::Itertools;
 use lapce_core::{
     buffer::rope_text::RopeText, command::FocusCommand, language::LapceLanguage,
     line_ending::LineEnding, mode::Mode, movement::Movement, selection::Selection,
-    syntax::Syntax,
 };
 use lapce_rpc::proxy::{PathRequest, ProxyResponse};
 use lapce_xi_rope::Rope;
@@ -1156,7 +1155,7 @@ impl PaletteData {
                         }
                     };
                     if name.is_empty() || name.to_lowercase().eq("plain text") {
-                        doc.set_syntax(Syntax::plaintext())
+                        doc.set_language(LapceLanguage::PlainText)
                     } else {
                         let lang = match LapceLanguage::from_name(name) {
                             Some(v) => v,
@@ -1164,7 +1163,6 @@ impl PaletteData {
                         };
                         doc.set_language(lang);
                     }
-                    doc.trigger_syntax_change(None);
                 }
                 PaletteItemContent::LineEnding { kind } => {
                     let Some(editor) = self.main_split.active_editor.get_untracked()

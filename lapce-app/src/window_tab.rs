@@ -1572,6 +1572,16 @@ impl WindowTabData {
 
     fn handle_core_notification(&self, rpc: &CoreNotification) {
         match rpc {
+            CoreNotification::PublishHighlights { highlights } => {
+                if let Some(doc) = self
+                    .main_split
+                    .docs
+                    .with_untracked(|docs| docs.get(&highlights.path).cloned())
+                {
+                    doc.accept_highlights(highlights.clone());
+                }
+            }
+
             // Decode legacy backend messages without reviving removed debugger UI.
             CoreNotification::RunInTerminal { .. }
             | CoreNotification::DapStopped { .. }
@@ -1672,7 +1682,7 @@ impl WindowTabData {
                     self.main_split.docs.with_untracked(|x| {
                         for doc in x.values() {
                             doc.get_document_symbol();
-                            doc.get_semantic_styles();
+                            doc.request_highlights();
                             doc.get_folding_range();
                             doc.get_inlay_hints();
                         }

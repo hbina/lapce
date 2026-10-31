@@ -1,60 +1,113 @@
-use lapce_core::{cursor::Cursor, syntax::Syntax};
-use lapce_engine::document::{DocContent, Document};
+use lapce_core::buffer::rope_text::RopeText;
+use lapce_engine::{
+    document::{DocContent, Document},
+    session::SessionDocument,
+};
+use lapce_rpc::highlighting::{
+    HighlightSnapshot, HighlightSpan, HighlightStatus, TextSnapshot,
+};
 use lapce_xi_rope::Rope;
 
-#[test]
-fn headless_syntax_jobs_are_accepted_only_by_their_document() {
-    let mut document = Document::new(DocContent::Local, Rope::from("hello"));
-    let result = document.syntax_job(None).run().unwrap();
-    assert!(document.accept_syntax(result));
-    let mut source = Document::new(DocContent::Local, Rope::from("hello"));
-    let result = source.syntax_job(None).run().unwrap();
-    let mut other = Document::new(DocContent::Local, Rope::from("hello"));
-    // Give both documents the same revision and job generation. Identity alone
-    // must still prevent one document from accepting the other's result.
-    let _ = other.syntax_job(None);
-    assert!(!other.accept_syntax(result));
-}
-
-#[test]
-fn starting_a_new_job_cancels_an_unrun_job_and_rejects_completed_old_results() {
-    let mut document = Document::new(DocContent::Local, Rope::from("hello"));
-    let old = document.syntax_job(None);
-    let current = document.syntax_job(None);
-    assert!(old.run().is_none());
-    assert!(document.accept_syntax(current.run().unwrap()));
-    let result = document.syntax_job(None).run().unwrap();
-    let current = document.syntax_job(None);
-    assert!(!document.accept_syntax(result));
-    assert!(document.accept_syntax(current.run().unwrap()));
-}
-
-#[test]
-fn language_changes_invalidate_results_even_when_text_revision_is_unchanged() {
-    let mut document = Document::new(DocContent::Local, Rope::from("hello"));
-    let result = document.syntax_job(None).run().unwrap();
-    let revision = document.buffer.rev();
-    document.set_syntax(Syntax::from_language(
-        lapce_core::language::LapceLanguage::Rust,
+fn fixture() -> (SessionDocument, HighlightSnapshot) {
+    let mut document = SessionDocument::new(Document::new(
+        DocContent::File {
+            path: "a.rs".into(),
+            read_only: true,
+        },
+        Rope::from("// é\nfn main() {}"),
     ));
-    assert_eq!(document.buffer.rev(), revision);
-    assert!(!document.accept_syntax(result));
-    let result = document.syntax_job(None).run().unwrap();
-    assert!(document.accept_syntax(result));
-    assert_eq!(
-        document.syntax.language,
-        lapce_core::language::LapceLanguage::Rust
-    );
+    document.initialize_sync(7);
+    let snapshot = TextSnapshot {
+        instance: "backend-buffer-1".into(),
+        revision: 7,
+    };
+    document.document.backend_snapshot = Some(snapshot.clone());
+    let result = HighlightSnapshot {
+        path: "a.rs".into(),
+        language: "rust".into(),
+        snapshot,
+        generation: 1,
+        text_len: document.buffer.len(),
+        status: HighlightStatus::Ready,
+        spans: vec![HighlightSpan {
+            start: 0,
+            end: 5,
+            scope: "comment".into(),
+        }],
+        brackets: vec![],
+        structure: vec![],
+        normal_lines: vec![],
+    };
+    (document, result)
 }
 
 #[test]
-fn edits_cancel_pending_parses_and_reject_completed_results() {
-    let mut document = Document::new(DocContent::Local, Rope::from("hello"));
-    let result = document.syntax_job(None).run().unwrap();
-    let pending = document.syntax_job(None);
-    document.insert(&mut Cursor::origin(false), "new", false, false);
-    assert!(pending.run().is_none());
-    assert!(!document.accept_syntax(result));
-    let result = document.syntax_job(None).run().unwrap();
-    assert!(document.accept_syntax(result));
+fn presentation_accepts_only_its_current_backend_snapshot() {
+    let (mut document, result) = fixture();
+    assert!(
+        document.syntax.layers.is_none(),
+        "frontend must not initialize a parser"
+    );
+    for bad in [
+        {
+            let mut bad = result.clone();
+            bad.path = "other.rs".into();
+            bad
+        },
+        {
+            let mut bad = result.clone();
+            bad.snapshot.instance = "retired-backend".into();
+            bad
+        },
+        {
+            let mut bad = result.clone();
+            bad.snapshot.revision += 1;
+            bad
+        },
+        {
+            let mut bad = result.clone();
+            bad.text_len += 1;
+            bad
+        },
+        {
+            let mut bad = result.clone();
+            bad.spans[0].end = 4;
+            bad
+        }, // inside é
+        {
+            let mut bad = result.clone();
+            bad.spans.push(bad.spans[0].clone());
+            bad
+        },
+    ] {
+        assert!(!document.accept_highlights(bad));
+    }
+    assert!(document.accept_highlights(result.clone()));
+    assert!(!document.accept_highlights(result.clone()));
+    let mut enrichment = result;
+    enrichment.generation += 1;
+    enrichment.spans.push(HighlightSpan {
+        start: 6,
+        end: 8,
+        scope: "keyword".into(),
+    });
+    assert!(document.accept_highlights(enrichment));
+    assert!(document.syntax.layers.is_none());
+}
+
+#[test]
+fn reload_and_disconnect_clear_styles_and_reject_delayed_results() {
+    let (mut document, result) = fixture();
+    assert!(document.accept_highlights(result.clone()));
+    document
+        .document
+        .reload(Rope::from("// é\nfn next() {}"), true);
+    assert!(document.highlights.is_none());
+    assert!(document.syntax.styles.is_none());
+    assert!(!document.accept_highlights(result));
+    let (mut document, result) = fixture();
+    assert!(document.accept_highlights(result.clone()));
+    document.backend_disconnected();
+    assert!(document.highlights.is_none());
+    assert!(!document.accept_highlights(result));
 }

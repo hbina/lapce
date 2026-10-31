@@ -84,6 +84,7 @@ impl DocumentModel {
             .is_some()
         {
             self.sync_changed.set(());
+            self.syntax_changed.set(());
         }
     }
     pub fn backend_ready(self) -> bool {
@@ -346,18 +347,13 @@ impl DocumentModel {
         }
     }
 
-    pub fn syntax_job(
+    pub fn accept_highlights(
         self,
-        edits: Option<Vec<lapce_core::syntax::edit::SyntaxEdit>>,
-    ) -> Option<lapce_engine::syntax::SyntaxJob> {
-        self.document
-            .try_update(|document| document.syntax_job(edits))
-    }
-
-    pub fn accept_syntax(self, result: lapce_engine::syntax::SyntaxResult) -> bool {
+        highlights: lapce_rpc::highlighting::HighlightSnapshot,
+    ) -> bool {
         let accepted = self
             .document
-            .try_update(|document| document.accept_syntax(result))
+            .try_update(|document| document.accept_highlights(highlights))
             .unwrap_or(false);
         if accepted {
             self.syntax_changed.set(());
@@ -477,9 +473,29 @@ mod tests {
     }
 
     #[test]
-    fn syntax_observers_are_notified_only_after_engine_acceptance() {
+    fn syntax_observers_are_notified_only_after_backend_snapshot_acceptance() {
+        use lapce_rpc::highlighting::{
+            HighlightSnapshot, HighlightSpan, HighlightStatus, TextSnapshot,
+        };
         let scope = Scope::new();
-        let model = DocumentModel::new(scope, Document::empty(DocContent::Local));
+        let model = DocumentModel::new(
+            scope,
+            Document::new(
+                DocContent::File {
+                    path: "test.rs".into(),
+                    read_only: true,
+                },
+                "fn main() {}".into(),
+            ),
+        );
+        let snapshot = TextSnapshot {
+            instance: "backend-one".into(),
+            revision: 1,
+        };
+        model.document.update(|session| {
+            session.initialize_sync(1);
+            session.document.backend_snapshot = Some(snapshot.clone());
+        });
         let reads = Rc::new(Cell::new(0));
         let syntax = model.syntax();
         scope.create_effect({
@@ -489,15 +505,33 @@ mod tests {
                 reads.set(reads.get() + 1);
             }
         });
-        let result = model.syntax_job(None).unwrap().run().unwrap();
+        let result = HighlightSnapshot {
+            language: "rust".into(),
+            path: "test.rs".into(),
+            snapshot,
+            text_len: 12,
+            generation: 1,
+            status: HighlightStatus::Ready,
+            spans: vec![HighlightSpan {
+                start: 0,
+                end: 2,
+                scope: "keyword".into(),
+            }],
+            brackets: vec![],
+            structure: vec![],
+            normal_lines: vec![],
+        };
+        let mut stale = result.clone();
+        stale.snapshot.instance = "old-backend".into();
+        assert!(!model.accept_highlights(stale));
         assert_eq!(reads.get(), 1);
-        model.set_syntax(lapce_core::syntax::Syntax::plaintext());
+        assert!(model.accept_highlights(result.clone()));
         assert_eq!(reads.get(), 2);
-        assert!(!model.accept_syntax(result));
+        assert!(!model.accept_highlights(result));
         assert_eq!(reads.get(), 2);
-        let result = model.syntax_job(None).unwrap().run().unwrap();
-        assert!(model.accept_syntax(result));
+        model.backend_disconnected();
         assert_eq!(reads.get(), 3);
+        assert!(syntax.with_untracked(|syntax| syntax.styles.is_none()));
         scope.dispose();
     }
 }

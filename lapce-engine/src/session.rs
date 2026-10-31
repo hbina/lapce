@@ -244,7 +244,9 @@ impl SessionDocument {
             return Err("Document must be a closed file before retargeting".into());
         }
         self.document
-            .set_syntax(lapce_core::syntax::Syntax::init(&path));
+            .set_syntax(lapce_core::syntax::Syntax::without_parser(
+                lapce_core::language::LapceLanguage::from_path(&path),
+            ));
         self.document.inlay_hints = None;
         self.document.content = crate::document::DocContent::File {
             path,

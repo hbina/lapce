@@ -1,8 +1,8 @@
 use floem::text::{
     Attrs, AttrsList, FamilyOwned, LineHeightValue, Style, TextLayout, Weight,
 };
-use lapce_core::{language::LapceLanguage, syntax::Syntax};
-use lapce_xi_rope::Rope;
+use lapce_core::language::LapceLanguage;
+use lapce_rpc::highlighting::{CodeBlock, CodeHighlights};
 use lsp_types::MarkedString;
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Options, Parser, Tag};
 use smallvec::SmallVec;
@@ -20,6 +20,7 @@ pub fn parse_markdown(
     text: &str,
     line_height: f64,
     config: &LapceConfig,
+    highlights: &[CodeHighlights],
 ) -> Vec<MarkdownContent> {
     let mut res = Vec::new();
 
@@ -101,6 +102,7 @@ pub fn parse_markdown(
                                 &last_text,
                                 start_offset,
                                 config,
+                                highlights,
                             );
                             builder_dirty = true;
                         }
@@ -280,38 +282,95 @@ pub fn highlight_as_code(
     text: &str,
     start_offset: usize,
     config: &LapceConfig,
+    highlights: &[CodeHighlights],
 ) {
-    let syntax = language.map(Syntax::from_language);
+    let Some(language) = language else { return };
+    let Some(block) = highlights.iter().find(|block| {
+        block.code.text == text
+            && LapceLanguage::from_name(&block.code.language) == Some(language)
+    }) else {
+        return;
+    };
+    for span in &block.spans {
+        if span.start >= span.end
+            || span.end > text.len()
+            || !text.is_char_boundary(span.start)
+            || !text.is_char_boundary(span.end)
+        {
+            continue;
+        }
+        if let Some(color) = config.style_color(&span.scope) {
+            attr_list.add_span(
+                start_offset + span.start..start_offset + span.end,
+                default_attrs.clone().color(color),
+            );
+        }
+    }
+}
 
-    let styles = syntax
-        .map(|mut syntax| {
-            syntax.parse(0, Rope::from(text), None);
-            syntax.styles
-        })
-        .unwrap_or(None);
-
-    if let Some(styles) = styles {
-        for (range, style) in styles.iter() {
-            if let Some(color) = style
-                .fg_color
-                .as_ref()
-                .and_then(|fg| config.style_color(fg))
-            {
-                attr_list.add_span(
-                    start_offset + range.start..start_offset + range.end,
-                    default_attrs.clone().color(color),
-                );
+/// Extract formatting boundaries only; classification executes in the backend.
+pub fn hover_code_blocks(hover: &lsp_types::Hover) -> Vec<CodeBlock> {
+    fn markdown(source: &str, blocks: &mut Vec<CodeBlock>) {
+        let mut current: Option<CodeBlock> = None;
+        for event in Parser::new(source) {
+            match event {
+                Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(language))) => {
+                    if let Some(language) = md_language_to_lapce_language(&language)
+                    {
+                        current = Some(CodeBlock {
+                            language: language.to_string(),
+                            text: String::new(),
+                        });
+                    }
+                }
+                Event::Text(text) => {
+                    if let Some(block) = &mut current {
+                        block.text.push_str(&text);
+                    }
+                }
+                Event::End(pulldown_cmark::TagEnd::CodeBlock) => {
+                    if let Some(block) = current.take() {
+                        blocks.push(block);
+                    }
+                }
+                _ => {}
             }
         }
     }
+    fn marked(value: &MarkedString, blocks: &mut Vec<CodeBlock>) {
+        match value {
+            MarkedString::String(source) => markdown(source, blocks),
+            MarkedString::LanguageString(code) => markdown(
+                &format!("```{}\n{}\n```", code.language, code.value),
+                blocks,
+            ),
+        }
+    }
+    let mut blocks = Vec::new();
+    match &hover.contents {
+        lsp_types::HoverContents::Scalar(value) => marked(value, &mut blocks),
+        lsp_types::HoverContents::Array(values) => {
+            for value in values {
+                marked(value, &mut blocks);
+            }
+        }
+        lsp_types::HoverContents::Markup(value)
+            if value.kind == lsp_types::MarkupKind::Markdown =>
+        {
+            markdown(&value.value, &mut blocks)
+        }
+        _ => {}
+    }
+    blocks
 }
 
 pub fn from_marked_string(
     text: MarkedString,
     config: &LapceConfig,
+    highlights: &[CodeHighlights],
 ) -> Vec<MarkdownContent> {
     match text {
-        MarkedString::String(text) => parse_markdown(&text, 1.8, config),
+        MarkedString::String(text) => parse_markdown(&text, 1.8, config, highlights),
         // This is a short version of a code block
         MarkedString::LanguageString(code) => {
             // TODO: We could simply construct the MarkdownText directly
@@ -320,6 +379,7 @@ pub fn from_marked_string(
                 &format!("```{}\n{}\n```", code.language, code.value),
                 1.8,
                 config,
+                highlights,
             )
         }
     }

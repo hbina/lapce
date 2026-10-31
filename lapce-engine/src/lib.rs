@@ -17,7 +17,6 @@ pub mod session;
 pub mod snippet;
 pub mod source_control;
 pub mod sync;
-pub mod syntax;
 pub mod terminal;
 pub mod view_state;
 pub mod workspace;

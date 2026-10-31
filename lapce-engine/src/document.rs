@@ -69,7 +69,6 @@ pub struct Document {
     pub backend_snapshot: Option<lapce_rpc::highlighting::TextSnapshot>,
     pub highlights:
         Option<std::sync::Arc<lapce_rpc::highlighting::HighlightSnapshot>>,
-    syntax_generation: u64,
     disk_baseline: Option<lapce_xi_rope::Rope>,
     missing_on_disk: bool,
 }
@@ -84,11 +83,19 @@ impl Document {
     /// Construct a document before its text has arrived from the host.
     pub fn empty(content: DocContent) -> Self {
         let syntax = match &content {
-            DocContent::File { path, .. } => lapce_core::syntax::Syntax::init(path),
-            DocContent::History(history) => {
-                lapce_core::syntax::Syntax::init(&history.path)
+            DocContent::File { path, .. } => {
+                lapce_core::syntax::Syntax::without_parser(
+                    lapce_core::language::LapceLanguage::from_path(path),
+                )
             }
-            _ => lapce_core::syntax::Syntax::plaintext(),
+            DocContent::History(history) => {
+                lapce_core::syntax::Syntax::without_parser(
+                    lapce_core::language::LapceLanguage::from_path(&history.path),
+                )
+            }
+            _ => lapce_core::syntax::Syntax::without_parser(
+                lapce_core::language::LapceLanguage::PlainText,
+            ),
         };
         Self {
             id: match &content {
@@ -105,7 +112,6 @@ impl Document {
             inlay_hints: None,
             backend_snapshot: None,
             highlights: None,
-            syntax_generation: 0,
             disk_baseline: None,
             missing_on_disk: false,
         }
@@ -161,7 +167,6 @@ impl Document {
     }
 
     pub fn load(&mut self, text: lapce_xi_rope::Rope) {
-        self.cancel_syntax_jobs();
         self.invalidate_highlights();
         self.inlay_hints = None;
         self.buffer.init_content(text);
@@ -183,48 +188,7 @@ impl Document {
     }
 
     pub fn set_syntax(&mut self, syntax: lapce_core::syntax::Syntax) {
-        self.cancel_syntax_jobs();
         self.syntax = syntax;
-    }
-
-    pub fn cancel_syntax_jobs(&mut self) {
-        self.syntax
-            .cancel_flag
-            .store(1, std::sync::atomic::Ordering::Relaxed);
-        self.syntax_generation += 1;
-    }
-
-    pub fn syntax_job(
-        &mut self,
-        edits: Option<Vec<lapce_core::syntax::edit::SyntaxEdit>>,
-    ) -> crate::syntax::SyntaxJob {
-        self.cancel_syntax_jobs();
-        self.syntax.cancel_flag =
-            std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        crate::syntax::SyntaxJob {
-            document_id: self.id,
-            revision: self.buffer.rev(),
-            generation: self.syntax_generation,
-            syntax: self.syntax.clone(),
-            text: self.buffer.text().clone(),
-            edits,
-        }
-    }
-
-    pub fn accept_syntax(&mut self, result: crate::syntax::SyntaxResult) -> bool {
-        if result.document_id != self.id
-            || result.revision != self.buffer.rev()
-            || result.generation != self.syntax_generation
-            || result
-                .syntax
-                .cancel_flag
-                .load(std::sync::atomic::Ordering::Relaxed)
-                != 0
-        {
-            return false;
-        }
-        self.syntax = result.syntax;
-        true
     }
 
     pub fn insert(
@@ -313,7 +277,6 @@ impl Document {
 
     fn apply_annotation_deltas(&mut self, deltas: &[crate::editing::DocumentDelta]) {
         if !deltas.is_empty() {
-            self.cancel_syntax_jobs();
             self.invalidate_highlights();
         }
         if let Some(hints) = self.inlay_hints.as_mut() {

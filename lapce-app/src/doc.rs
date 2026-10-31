@@ -49,7 +49,7 @@ use lapce_core::{
     register::Register,
     selection::{InsertDrift, Selection},
     style::line_styles,
-    syntax::{BracketParser, Syntax, edit::SyntaxEdit},
+    syntax::Syntax,
     word::{CharClassification, WordCursor, get_char_property},
 };
 use lapce_rpc::{
@@ -103,6 +103,22 @@ pub use lapce_engine::annotations::DocumentHighlight;
 pub mod model;
 use model::{DocumentField, DocumentModel};
 
+/// Theme-independent bracket ranges received from the backend.
+pub struct BracketStyles {
+    pub bracket_pos: HashMap<usize, Vec<LineStyle>>,
+    pub active: bool,
+    pub limit: u64,
+}
+impl BracketStyles {
+    fn new(active: bool, limit: u64) -> Self {
+        Self {
+            bracket_pos: HashMap::new(),
+            active,
+            limit,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct Doc {
     pub scope: Scope,
@@ -126,7 +142,6 @@ pub struct Doc {
     pub buffer: DocumentField<Buffer>,
     pub syntax: DocumentField<Syntax>,
     model: DocumentModel,
-    semantic_styles: RwSignal<Option<Spans<Style>>>,
     /// Inlay hints for the document
     pub inlay_hints: DocumentField<Option<Spans<InlayHint>>>,
     /// Current completion lens text, if any.
@@ -148,7 +163,7 @@ pub struct Doc {
     pub head_changes: RwSignal<im::Vector<DiffLines>>,
 
     line_styles: Rc<RefCell<LineStyles>>,
-    pub parser: Rc<RefCell<BracketParser>>,
+    pub parser: Rc<RefCell<BracketStyles>>,
 
     /// A cache for the sticky headers which maps a line to the lines it should show in the header.
     pub sticky_headers: Rc<RefCell<HashMap<usize, Option<Vec<usize>>>>>,
@@ -192,12 +207,10 @@ impl Doc {
             syntax: model.syntax(),
             model,
             line_styles: Rc::new(RefCell::new(HashMap::new())),
-            parser: Rc::new(RefCell::new(BracketParser::new(
-                String::new(),
+            parser: Rc::new(RefCell::new(BracketStyles::new(
                 config.editor.bracket_pair_colorization,
                 config.editor.bracket_colorization_limit,
             ))),
-            semantic_styles: cx.create_rw_signal(None),
             inlay_hints: model.inlay_hints(),
             diagnostics,
             completion_lens: cx.create_rw_signal(None),
@@ -247,12 +260,10 @@ impl Doc {
             syntax: model.syntax(),
             model,
             line_styles: Rc::new(RefCell::new(HashMap::new())),
-            parser: Rc::new(RefCell::new(BracketParser::new(
-                String::new(),
+            parser: Rc::new(RefCell::new(BracketStyles::new(
                 config.editor.bracket_pair_colorization,
                 config.editor.bracket_colorization_limit,
             ))),
-            semantic_styles: cx.create_rw_signal(None),
             inlay_hints: model.inlay_hints(),
             diagnostics: DiagnosticData::new(cx),
             completion_lens: cx.create_rw_signal(None),
@@ -297,12 +308,10 @@ impl Doc {
             syntax: model.syntax(),
             model,
             line_styles: Rc::new(RefCell::new(HashMap::new())),
-            parser: Rc::new(RefCell::new(BracketParser::new(
-                String::new(),
+            parser: Rc::new(RefCell::new(BracketStyles::new(
                 config.editor.bracket_pair_colorization,
                 config.editor.bracket_colorization_limit,
             ))),
-            semantic_styles: cx.create_rw_signal(None),
             inlay_hints: model.inlay_hints(),
             diagnostics: DiagnosticData::new(cx),
             completion_lens: cx.create_rw_signal(None),
@@ -383,16 +392,23 @@ impl Doc {
     pub fn set_syntax(&self, syntax: Syntax) {
         batch(|| {
             self.model.set_syntax(syntax);
-            if self.semantic_styles.with_untracked(|s| s.is_none()) {
-                self.clear_style_cache();
-            }
+            self.clear_style_cache();
             self.clear_sticky_headers_cache();
         });
     }
 
     /// Set the syntax highlighting this document should use.
     pub fn set_language(&self, language: LapceLanguage) {
-        self.set_syntax(Syntax::from_language(language));
+        let doc = self.clone();
+        let send = create_ext_action(self.scope, move |result| {
+            if let Ok(ProxyResponse::HighlightSnapshot { highlights }) = result {
+                doc.accept_highlights(highlights);
+            }
+        });
+        self.request_navigation(
+            lapce_engine::navigation::NavigationQuery::SyntaxLanguage { language },
+            move |result| send(result),
+        );
     }
 
     pub fn find(&self) -> &Find {
@@ -416,8 +432,8 @@ impl Doc {
         batch(|| {
             let result = self.model.finish_opening(opening, response);
             if matches!(&result, Some(Ok(()))) {
-                self.on_update(None);
-                self.init_parser();
+                self.on_update();
+                self.refresh_bracket_styles();
                 self.init_diagnostics();
                 self.retrieve_head();
             }
@@ -434,28 +450,32 @@ impl Doc {
     pub fn init_content(&self, content: Rope) {
         batch(|| {
             self.model.update_buffer(|document| document.load(content));
-            self.on_update(None);
-            self.init_parser();
+            self.on_update();
+            self.refresh_bracket_styles();
             self.init_diagnostics();
             self.retrieve_head();
         });
     }
 
-    fn init_parser(&self) {
-        let code = self.buffer.get_untracked().to_string();
-        self.syntax.with_untracked(|syntax| {
-            if syntax.styles.is_some() {
-                self.parser.borrow_mut().update_code(
-                    code,
-                    &self.buffer.get_untracked(),
-                    Some(syntax),
-                );
-            } else {
-                self.parser.borrow_mut().update_code(
-                    code,
-                    &self.buffer.get_untracked(),
-                    None,
-                );
+    /// Project backend-computed bracket spans into the existing line renderer.
+    fn refresh_bracket_styles(&self) {
+        self.parser.borrow_mut().bracket_pos.clear();
+        self.model.with_document(|document| {
+            if let Some(highlights) = &document.highlights
+                && document.buffer.num_lines() < self.parser.borrow().limit as usize
+            {
+                let mut parser = self.parser.borrow_mut();
+                for span in &highlights.brackets {
+                    let (line, start) =
+                        document.buffer.offset_to_line_col(span.start);
+                    parser.bracket_pos.entry(line).or_default().push(LineStyle {
+                        start,
+                        end: start + span.end - span.start,
+                        style: Style {
+                            fg_color: Some(span.scope.clone()),
+                        },
+                    });
+                }
             }
         });
     }
@@ -578,8 +598,7 @@ impl Doc {
         });
 
         self.dispatch_sync();
-        let edits = lapce_engine::syntax::edits_from_deltas(deltas);
-        self.on_update(Some(edits));
+        self.on_update();
     }
 
     pub fn is_pristine(&self) -> bool {
@@ -602,38 +621,17 @@ impl Doc {
         self.buffer.with_untracked(|b| b.line_ending())
     }
 
-    fn on_update(&self, edits: Option<Vec<SyntaxEdit>>) {
+    fn on_update(&self) {
         batch(|| {
-            self.trigger_syntax_change(edits);
+            self.refresh_bracket_styles();
+            self.request_highlights();
             self.trigger_head_change();
             self.get_inlay_hints();
             self.find_result.reset();
-            self.get_semantic_styles();
-            self.do_bracket_colorization();
             self.clear_style_cache();
             self.get_document_symbol();
             self.get_folding_range();
         });
-    }
-
-    fn do_bracket_colorization(&self) {
-        if self.parser.borrow().active {
-            self.syntax.with_untracked(|syntax| {
-                if syntax.rev == self.rev() && syntax.styles.is_some() {
-                    self.parser.borrow_mut().update_code(
-                        self.buffer.get_untracked().to_string(),
-                        &self.buffer.get_untracked(),
-                        Some(syntax),
-                    );
-                } else {
-                    self.parser.borrow_mut().update_code(
-                        self.buffer.get_untracked().to_string(),
-                        &self.buffer.get_untracked(),
-                        None,
-                    );
-                }
-            })
-        }
     }
 
     pub fn do_text_edit(&self, edits: &[TextEdit]) {
@@ -650,11 +648,6 @@ impl Doc {
     /// This does not do a reparse of the document itself.
     fn update_styles(&self, delta: &RopeDelta) {
         batch(|| {
-            self.semantic_styles.update(|styles| {
-                if let Some(styles) = styles.as_mut() {
-                    styles.apply_shape(delta);
-                }
-            });
             self.syntax.update(|syntax| {
                 if let Some(styles) = syntax.styles.as_mut() {
                     styles.apply_shape(delta);
@@ -664,24 +657,33 @@ impl Doc {
         });
     }
 
-    /// Schedule a syntax parse of the current document revision.
-    pub fn trigger_syntax_change(&self, edits: Option<Vec<SyntaxEdit>>) {
-        let Some(job) = self.model.syntax_job(edits) else {
+    /// Retrieve cached backend styles after opening/reloading. Publications carry
+    /// later parse and semantic generations without replacing the editor text.
+    pub fn request_highlights(&self) {
+        if !self.backend_ready() || !self.loaded() {
             return;
-        };
+        }
         let doc = self.clone();
         let send = create_ext_action(self.scope, move |result| {
-            if doc.model.accept_syntax(result) {
-                doc.do_bracket_colorization();
-                doc.clear_style_cache();
-                doc.clear_sticky_headers_cache();
+            if let Ok(ProxyResponse::HighlightSnapshot { highlights }) = result {
+                doc.accept_highlights(highlights);
             }
         });
-        rayon::spawn(move || {
-            if let Some(result) = job.run() {
-                send(result);
-            }
-        });
+        self.request_navigation(
+            lapce_engine::navigation::NavigationQuery::HighlightSnapshot,
+            move |result| send(result),
+        );
+    }
+
+    pub fn accept_highlights(
+        &self,
+        highlights: lapce_rpc::highlighting::HighlightSnapshot,
+    ) {
+        if self.model.accept_highlights(highlights) {
+            self.refresh_bracket_styles();
+            self.clear_style_cache();
+            self.clear_sticky_headers_cache();
+        }
     }
 
     fn clear_style_cache(&self) {
@@ -705,14 +707,9 @@ impl Doc {
         self.sticky_headers.borrow_mut().clear();
     }
 
-    /// Get the active style information, either the semantic styles or the
-    /// tree-sitter syntax styles.
+    /// Backend-selected syntax and semantic styles for the current text snapshot.
     fn styles(&self) -> Option<Spans<Style>> {
-        if let Some(semantic_styles) = self.semantic_styles.get_untracked() {
-            Some(semantic_styles)
-        } else {
-            self.syntax.with_untracked(|syntax| syntax.styles.clone())
-        }
+        self.syntax.with_untracked(|syntax| syntax.styles.clone())
     }
 
     /// Get the style information for the particular line from semantic/syntax highlighting.
@@ -733,51 +730,6 @@ impl Doc {
                 .insert(line, Arc::new(line_styles));
         }
         self.line_styles.borrow().get(&line).cloned().unwrap()
-    }
-
-    /// Request semantic styles for the buffer from the LSP through the proxy.
-    pub fn get_semantic_styles(&self) {
-        if !self.backend_ready() {
-            return;
-        }
-        if !self.loaded() {
-            return;
-        }
-
-        let (atomic_rev, rev, text) = self
-            .buffer
-            .with_untracked(|b| (b.atomic_rev(), b.rev(), b.text().clone()));
-
-        let doc = self.clone();
-        let send = create_ext_action(self.scope, move |styles| {
-            if let Some(styles) = styles {
-                if doc.buffer.with_untracked(|b| b.rev()) == rev {
-                    doc.semantic_styles.set(Some(styles));
-                    doc.clear_style_cache();
-                }
-            }
-        });
-
-        self.request_navigation(
-            lapce_engine::navigation::NavigationQuery::SemanticTokens,
-            move |result| {
-                if let Ok(ProxyResponse::GetSemanticTokens { styles }) = result {
-                    if atomic_rev.load(atomic::Ordering::Acquire) != rev {
-                        send(None);
-                        return;
-                    }
-                    std::thread::spawn(move || {
-                        send(lapce_engine::annotations::semantic_spans(
-                            &text,
-                            styles.styles,
-                            || atomic_rev.load(atomic::Ordering::Acquire) != rev,
-                        ));
-                    });
-                } else {
-                    send(None);
-                }
-            },
-        );
     }
 
     pub fn get_document_symbol(&self) {
@@ -1168,13 +1120,16 @@ impl Doc {
 
     pub fn backend_disconnected(&self) {
         self.model.backend_disconnected();
+        self.refresh_bracket_styles();
+        self.clear_style_cache();
+        self.clear_sticky_headers_cache();
         self.cancel_operation_actions("Backend disconnected".into());
         self.cancel_document_requests();
     }
 
     fn refresh_backend_annotations(&self) {
         self.get_inlay_hints();
-        self.get_semantic_styles();
+        self.request_highlights();
         self.get_document_symbol();
         self.get_folding_range();
     }
@@ -1377,9 +1332,9 @@ impl Doc {
         let send = create_ext_action(self.scope, move |response| {
             let result = doc.model.finish_reopen(plan, response);
             if result.is_ok() {
-                doc.init_parser();
+                doc.refresh_bracket_styles();
                 doc.init_diagnostics();
-                doc.trigger_syntax_change(None);
+                doc.request_highlights();
                 doc.clear_style_cache();
                 doc.clear_sticky_headers_cache();
                 doc.dispatch_sync();
@@ -1491,7 +1446,7 @@ impl Doc {
         let rev = self.rev();
         self.syntax
             .with_untracked(|syntax| {
-                (!syntax.text.is_empty() && syntax.rev == rev)
+                (syntax.remote_structure.is_some() && syntax.rev == rev)
                     .then(|| syntax.find_enclosing_pair(offset))
             })
             // If syntax.text is empty, either the buffer is empty or we don't have syntax support
@@ -1593,7 +1548,7 @@ impl Document for Doc {
 
     fn find_unmatched(&self, offset: usize, previous: bool, ch: char) -> usize {
         self.syntax().with_untracked(|syntax| {
-            if syntax.layers.is_some() {
+            if syntax.remote_structure.is_some() {
                 syntax
                     .find_tag(offset, previous, &CharBuffer::from(ch))
                     .unwrap_or(offset)
@@ -1613,7 +1568,7 @@ impl Document for Doc {
 
     fn find_matching_pair(&self, offset: usize) -> usize {
         self.syntax().with_untracked(|syntax| {
-            if syntax.layers.is_some() {
+            if syntax.remote_structure.is_some() {
                 syntax.find_matching_pair(offset).unwrap_or(offset)
             } else {
                 let text = self.text();
@@ -1987,7 +1942,9 @@ impl DocStyling {
     ) {
         let config = self.config.get_untracked();
         let phantom_text = self.doc.phantom_text(edid, style, line);
-        if let Some(bracket_styles) = self.doc.parser.borrow().bracket_pos.get(&line)
+        if self.doc.parser.borrow().active
+            && let Some(bracket_styles) =
+                self.doc.parser.borrow().bracket_pos.get(&line)
         {
             for bracket_style in bracket_styles.iter() {
                 if let Some(fg_color) = bracket_style.style.fg_color.as_ref() {
