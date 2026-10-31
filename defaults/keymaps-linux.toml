@@ -215,10 +215,6 @@ command = "split_close"
 mode = "i"
 
 [[keymaps]]
-key = "ctrl+k f"
-command = "close_folder"
-
-[[keymaps]]
 key = "ctrl+F4"
 command = "split_close"
 

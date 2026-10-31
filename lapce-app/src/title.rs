@@ -6,7 +6,7 @@ use floem::{
     menu::{Menu, MenuItem},
     peniko::Color,
     reactive::{
-        Memo, ReadSignal, RwSignal, SignalGet, SignalUpdate, SignalWith, create_memo,
+        ReadSignal, RwSignal, SignalGet, SignalUpdate, SignalWith, create_memo,
     },
     style::{AlignItems, CursorStyle, JustifyContent},
     views::{Decorators, container, drag_window_area, empty, label, stack, svg},
@@ -182,17 +182,13 @@ fn middle(
             || LapceIcons::PALETTE_MENU,
             || false,
             || false,
-            || "Open Folder / Recent Workspace",
+            || "Open Folder in New Window",
             config,
         )
         .popout_menu(move || {
-            Menu::new("")
-                .entry(MenuItem::new("Open Folder").action(move || {
-                    workbench_command.send(LapceWorkbenchCommand::OpenFolder);
-                }))
-                .entry(MenuItem::new("Open Recent Workspace").action(move || {
-                    workbench_command.send(LapceWorkbenchCommand::PaletteWorkspace);
-                }))
+            Menu::new("").entry(MenuItem::new("Open Folder").action(move || {
+                workbench_command.send(LapceWorkbenchCommand::OpenFolder);
+            }))
         })
     };
 
@@ -235,7 +231,7 @@ fn middle(
             if workspace.clone().path.is_some() {
                 workbench_command.send(LapceWorkbenchCommand::PaletteHelpAndFile);
             } else {
-                workbench_command.send(LapceWorkbenchCommand::PaletteWorkspace);
+                workbench_command.send(LapceWorkbenchCommand::OpenFolder);
             }
         })
         .style(move |s| {
@@ -274,7 +270,6 @@ fn right(
     workbench_command: Listener<LapceWorkbenchCommand>,
     latest_release: ReadSignal<Arc<Option<ReleaseInfo>>>,
     update_in_progress: RwSignal<bool>,
-    num_window_tabs: Memo<usize>,
     window_maximized: RwSignal<bool>,
     config: ReadSignal<Arc<LapceConfig>>,
 ) -> impl View {
@@ -366,13 +361,7 @@ fn right(
             }),
         ))
         .style(move |s| s.margin_horiz(6.0)),
-        window_controls_view(
-            window_command,
-            true,
-            num_window_tabs,
-            window_maximized,
-            config,
-        ),
+        window_controls_view(window_command, window_maximized, config),
     ))
     .style(|s| {
         s.flex_basis(0)
@@ -389,7 +378,6 @@ pub fn title(window_tab_data: Rc<WindowTabData>) -> impl View {
     let window_command = window_tab_data.common.window_common.window_command;
     let latest_release = window_tab_data.common.window_common.latest_release;
     let proxy_status = window_tab_data.common.proxy_status;
-    let num_window_tabs = window_tab_data.common.window_common.num_window_tabs;
     let window_maximized = window_tab_data.common.window_common.window_maximized;
     let title_height = window_tab_data.title_height;
     let update_in_progress = window_tab_data.update_in_progress;
@@ -413,7 +401,6 @@ pub fn title(window_tab_data: Rc<WindowTabData>) -> impl View {
             workbench_command,
             latest_release,
             update_in_progress,
-            num_window_tabs,
             window_maximized,
             config,
         ),
@@ -438,8 +425,6 @@ pub fn title(window_tab_data: Rc<WindowTabData>) -> impl View {
 
 pub fn window_controls_view(
     window_command: Listener<WindowCommand>,
-    is_title: bool,
-    num_window_tabs: Memo<usize>,
     window_maximized: RwSignal<bool>,
     config: ReadSignal<Arc<LapceConfig>>,
 ) -> impl View {
@@ -487,10 +472,6 @@ pub fn window_controls_view(
         .style(|s| s.margin_right(6.0)),
     ))
     .style(move |s| {
-        s.apply_if(
-            !config.get_untracked().core.custom_titlebar
-                || (is_title && num_window_tabs.get() > 1),
-            |s| s.hide(),
-        )
+        s.apply_if(!config.get_untracked().core.custom_titlebar, |s| s.hide())
     })
 }

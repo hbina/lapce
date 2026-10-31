@@ -80,7 +80,7 @@ jobs:
 
       - name: Test foreground and embedded startup
         run: |
-          cargo test --profile ci --frozen -p lapce-app --lib cli_tests
+          cargo test --profile ci --frozen -p lapce-app --lib
           cargo test --profile ci --frozen -p lapce-proxy --lib
           cargo test --profile ci --frozen -p lapce-services --test logging
           cargo test --profile ci --frozen -p lapce-client --features embedded-backend --test process embedded_

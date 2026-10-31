@@ -11,6 +11,23 @@ Every invocation opens its own instance, including repeated launches of the same
 folder. There is no automatic window reuse or detached relaunch, and no `--wait`,
 `--new`, or `--reuse-window` option. The application inherits the launch environment.
 
+Each window has exactly one root folder and one backend session. There are no
+workspace tabs, workspace switching, or recent-workspace lists.
+
+A Floem invocation with multiple paths opens one window. A single folder argument
+sets its root. Multiple files or folders use their common parent directory; files
+open as editor tabs and directories are browsable in the explorer. For example:
+
+```sh
+cargo run --bin lapce-floem -- Cargo.toml README.md lapce-app lapce-core
+```
+
+The repository directory becomes the root, and both files open in that window.
+With no paths, the current directory is the root. Old saved workspace lists are
+ignored; window geometry and per-root file layouts are retained. Opening another
+folder or SSH root from the UI creates a new window. Reload Window rebuilds the
+current root's session, and disconnecting an SSH window closes that window.
+
 Default frontend builds run the backend inside the same process. The GUI owns the
 main thread, the backend dispatcher runs on `Lapce backend`, and queued logging
 runs on `Lapce logs`. Rendering, filesystem watching, transport, terminal handling,

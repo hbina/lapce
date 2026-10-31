@@ -5,7 +5,7 @@
   </a>
 </h1>
 
-This fork is a **Linux-only, read-only code browser**. Windows, macOS, and WSL are not supported. SSH workspaces require a Linux host.
+This fork is a **Linux-only, read-only code browser**. Windows, macOS, and WSL are not supported. SSH connections require a Linux host.
 
 <h4 align="center">Read-only code navigation for Linux</h4>
 
@@ -32,10 +32,10 @@ Lapce (IPA: /læps/) is written in pure Rust, with a UI in [Floem](https://githu
 * Always-read-only source browsing with navigation, selection, copying and search.
 * Language-server definitions, symbols, references, hover and diagnostics.
 * Read-only repository diffs and automatic refresh after external file changes.
-* Linux SSH workspaces and independent frontends sharing a backend.
-* Vim-style navigation and an optional terminal for workspace commands.
+* One root folder per window, Linux SSH connections, and independent frontends sharing a backend.
+* Vim-style navigation and an optional terminal for commands in the root folder.
 
-Editing, saving, workspace mutations and debugger execution are removed from
+Editing, saving, filesystem mutations and debugger execution are removed from
 the code browser. Search and command inputs remain editable.
 
 ## Installation

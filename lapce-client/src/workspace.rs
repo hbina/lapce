@@ -78,7 +78,6 @@ impl std::fmt::Display for LapceWorkspaceType {
 pub struct LapceWorkspace {
     pub kind: LapceWorkspaceType,
     pub path: Option<PathBuf>,
-    pub last_open: u64,
 }
 
 impl LapceWorkspace {
@@ -104,7 +103,6 @@ impl Default for LapceWorkspace {
         Self {
             kind: LapceWorkspaceType::Local,
             path: None,
-            last_open: 0,
         }
     }
 }

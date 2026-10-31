@@ -6,12 +6,12 @@ use structdesc::FieldNames;
 pub struct CoreConfig {
     #[serde(default)]
     #[field_names(
-        desc = "Local backend executable; empty uses the build default. Requires reopening the workspace."
+        desc = "Local backend executable; empty uses the build default. Requires reopening the window."
     )]
     pub backend_executable: String,
     #[serde(default)]
     #[field_names(
-        desc = "Shared backend Unix socket for this workspace; overrides the executable. Reopen the workspace after changing."
+        desc = "Shared backend Unix socket for this folder; overrides the executable. Reopen the window after changing."
     )]
     pub backend_socket: String,
     #[field_names(desc = "Enable modal editing (Vim like)")]

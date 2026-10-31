@@ -61,7 +61,6 @@ use crate::{
     find::Find,
     global_search::GlobalSearchData,
     hover::HoverData,
-    id::WindowTabId,
     inline_completion::InlineCompletionData,
     keypress::{EventRef, KeyPressData, KeyPressFocus, condition::Condition},
     listener::Listener,
@@ -155,7 +154,6 @@ impl std::fmt::Debug for CommonData {
 #[derive(Clone)]
 pub struct WindowTabData {
     pub scope: Scope,
-    pub window_tab_id: WindowTabId,
     pub workspace: Arc<LapceWorkspace>,
     pub palette: PaletteData,
     pub main_split: MainSplitData,
@@ -180,9 +178,7 @@ pub struct WindowTabData {
 
 impl std::fmt::Debug for WindowTabData {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("WindowTabData")
-            .field("window_tab_id", &self.window_tab_id)
-            .finish()
+        f.debug_struct("WindowTabData").finish()
     }
 }
 
@@ -409,18 +405,10 @@ impl WindowTabData {
         let panel_available_size = cx.create_memo(move |_| {
             let title_height = title_height.get();
             let status_height = status_height.get();
-            let num_window_tabs = window_common.num_window_tabs.get();
             let window_size = window_common.size.get();
             Size::new(
                 window_size.width,
-                window_size.height
-                    - title_height
-                    - status_height
-                    - if num_window_tabs > 1 {
-                        window_common.window_tab_header_height.get()
-                    } else {
-                        0.0
-                    },
+                window_size.height - title_height - status_height,
             )
         });
         let panel = workspace_info
@@ -488,7 +476,6 @@ impl WindowTabData {
 
         let window_tab_data = Self {
             scope: cx,
-            window_tab_id: WindowTabId::next(),
             workspace,
             palette,
             main_split,
@@ -640,30 +627,17 @@ impl WindowTabData {
                                     tracing::error!("No path");
                                     return;
                                 }),
-                                last_open: std::time::SystemTime::now()
-                                    .duration_since(std::time::UNIX_EPOCH)
-                                    .unwrap()
-                                    .as_secs(),
                             };
-                            window_command
-                                .send(WindowCommand::SetWorkspace { workspace });
+                            window_command.send(WindowCommand::OpenRootWindow {
+                                root: workspace,
+                            });
                         }
                     });
                 } else {
                     self.palette.run(PaletteKind::FileChooser);
                 }
             }
-            CloseFolder => {
-                if !self.workspace.kind.is_remote() {
-                    let window_command = self.common.window_common.window_command;
-                    let workspace = LapceWorkspace {
-                        kind: LapceWorkspaceType::Local,
-                        path: None,
-                        last_open: 0,
-                    };
-                    window_command.send(WindowCommand::SetWorkspace { workspace });
-                }
-            }
+
             OpenFile => {
                 if !self.workspace.kind.is_remote() {
                     let internal_command = self.common.internal_command;
@@ -806,13 +780,7 @@ impl WindowTabData {
                         });
                 }
             }
-            ReloadWindow => {
-                self.common.window_common.window_command.send(
-                    WindowCommand::SetWorkspace {
-                        workspace: (*self.workspace).clone(),
-                    },
-                );
-            }
+
             NewWindow => {
                 self.common
                     .window_common
@@ -826,32 +794,11 @@ impl WindowTabData {
                     .send(WindowCommand::CloseWindow);
             }
             // ==== Window Tabs ====
-            NewWindowTab => {
-                self.common.window_common.window_command.send(
-                    WindowCommand::NewWorkspaceTab {
-                        workspace: LapceWorkspace::default(),
-                        end: false,
-                    },
-                );
-            }
-            CloseWindowTab => {
-                self.common
-                    .window_common
-                    .window_command
-                    .send(WindowCommand::CloseWorkspaceTab { index: None });
-            }
-            NextWindowTab => {
-                self.common
-                    .window_common
-                    .window_command
-                    .send(WindowCommand::NextWorkspaceTab);
-            }
-            PreviousWindowTab => {
-                self.common
-                    .window_common
-                    .window_command
-                    .send(WindowCommand::PreviousWorkspaceTab);
-            }
+            ReloadWindow => self
+                .common
+                .window_common
+                .window_command
+                .send(WindowCommand::ReloadRoot),
 
             // ==== Editor Tabs ====
             NextEditorTab => {
@@ -969,17 +916,11 @@ impl WindowTabData {
                 self.palette.run(PaletteKind::SshHost);
             }
 
-            DisconnectRemote => {
-                self.common.window_common.window_command.send(
-                    WindowCommand::SetWorkspace {
-                        workspace: LapceWorkspace {
-                            kind: LapceWorkspaceType::Local,
-                            path: None,
-                            last_open: 0,
-                        },
-                    },
-                );
-            }
+            DisconnectRemote => self
+                .common
+                .window_common
+                .window_command
+                .send(WindowCommand::CloseWindow),
 
             // ==== Palette Commands ====
             PaletteHelp => self.palette.run(PaletteKind::PaletteHelp),
@@ -996,9 +937,6 @@ impl WindowTabData {
             PaletteWorkspaceSymbol => {}
             PaletteCommand => {
                 self.palette.run(PaletteKind::Command);
-            }
-            PaletteWorkspace => {
-                self.palette.run(PaletteKind::Workspace);
             }
 
             PaletteSCMReferences => {
@@ -2152,13 +2090,11 @@ impl WindowTabData {
 
         for folder in folders {
             self.common.window_common.window_command.send(
-                WindowCommand::NewWorkspaceTab {
-                    workspace: LapceWorkspace {
+                WindowCommand::OpenRootWindow {
+                    root: LapceWorkspace {
                         kind: self.workspace.kind.clone(),
                         path: Some(folder.path.clone()),
-                        last_open: 0,
                     },
-                    end: false,
                 },
             );
         }

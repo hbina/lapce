@@ -10,7 +10,7 @@ use lapce_core::directory::Directory;
 use sha2::{Digest, Sha256};
 
 use crate::{
-    app::{AppData, AppInfo},
+    app::AppData,
     doc::DocInfo,
     panel::{data::PanelOrder, kind::PanelKind},
     window::{WindowData, WindowInfo},
@@ -18,17 +18,14 @@ use crate::{
     workspace::{LapceWorkspace, WorkspaceInfo},
 };
 
-const APP: &str = "app";
 const WINDOW: &str = "window";
 const WORKSPACE_INFO: &str = "workspace_info";
 const WORKSPACE_FILES: &str = "workspace_files";
 const PANEL_ORDERS: &str = "panel_orders";
-const RECENT_WORKSPACES: &str = "recent_workspaces";
 
 pub enum SaveEvent {
-    App(AppInfo),
+    Window(WindowInfo),
     Workspace(LapceWorkspace, WorkspaceInfo),
-    RecentWorkspace(LapceWorkspace),
     Doc(DocInfo),
     PanelOrder(PanelOrder),
 }
@@ -64,8 +61,8 @@ impl LapceDb {
                 loop {
                     let event = save_rx.recv()?;
                     match event {
-                        SaveEvent::App(info) => {
-                            if let Err(err) = local_db.insert_app_info(info) {
+                        SaveEvent::Window(info) => {
+                            if let Err(err) = local_db.insert_window_info(info) {
                                 tracing::error!("{:?}", err);
                             }
                         }
@@ -76,13 +73,7 @@ impl LapceDb {
                                 tracing::error!("{:?}", err);
                             }
                         }
-                        SaveEvent::RecentWorkspace(workspace) => {
-                            if let Err(err) =
-                                local_db.insert_recent_workspace(workspace)
-                            {
-                                tracing::error!("{:?}", err);
-                            }
-                        }
+
                         SaveEvent::Doc(info) => {
                             if let Err(err) = local_db.insert_doc(&info) {
                                 tracing::error!("{:?}", err);
@@ -99,51 +90,6 @@ impl LapceDb {
             })
             .unwrap();
         Ok(db)
-    }
-
-    pub fn recent_workspaces(&self) -> Result<Vec<LapceWorkspace>> {
-        let workspaces =
-            std::fs::read_to_string(self.folder.join(RECENT_WORKSPACES))?;
-        let workspaces: Vec<LapceWorkspace> = serde_json::from_str(&workspaces)?;
-        Ok(workspaces)
-    }
-
-    pub fn update_recent_workspace(&self, workspace: &LapceWorkspace) -> Result<()> {
-        if workspace.path.is_none() {
-            return Ok(());
-        }
-        self.save_tx
-            .send(SaveEvent::RecentWorkspace(workspace.clone()))?;
-        Ok(())
-    }
-
-    fn insert_recent_workspace(&self, workspace: LapceWorkspace) -> Result<()> {
-        let mut workspaces = self.recent_workspaces().unwrap_or_default();
-
-        let mut exits = false;
-        for w in workspaces.iter_mut() {
-            if w.path == workspace.path && w.kind == workspace.kind {
-                w.last_open = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                exits = true;
-                break;
-            }
-        }
-        if !exits {
-            let mut workspace = workspace;
-            workspace.last_open = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs();
-            workspaces.push(workspace);
-        }
-        workspaces.sort_by_key(|w| -(w.last_open as i64));
-        let workspaces = serde_json::to_string_pretty(&workspaces)?;
-        std::fs::write(self.folder.join(RECENT_WORKSPACES), workspaces)?;
-
-        Ok(())
     }
 
     pub fn save_window_tab(&self, data: Rc<WindowTabData>) -> Result<()> {
@@ -186,66 +132,38 @@ impl LapceDb {
 
     pub fn save_app(&self, data: &AppData) -> Result<()> {
         let windows = data.windows.get_untracked();
-        for (_, window) in &windows {
-            if let Err(err) = self.save_window(window.clone()) {
-                tracing::error!("{:?}", err);
-            }
+        for window in windows.values() {
+            self.save_window(window.clone())?;
         }
-
-        let info = AppInfo {
-            windows: windows
-                .iter()
-                .map(|(_, window_data)| window_data.info())
-                .collect(),
-        };
-        if info.windows.is_empty() {
-            return Ok(());
+        if let Some(window) = windows
+            .get(&data.active_window.get_untracked())
+            .or_else(|| windows.values().next())
+        {
+            self.save_tx.send(SaveEvent::Window(window.info()))?;
         }
-
-        self.save_tx.send(SaveEvent::App(info))?;
-
         Ok(())
     }
 
-    pub fn insert_app_info(&self, info: AppInfo) -> Result<()> {
-        let info = serde_json::to_string_pretty(&info)?;
-        std::fs::write(self.folder.join(APP), info)?;
+    fn insert_window_info(&self, info: WindowInfo) -> Result<()> {
+        std::fs::write(
+            self.folder.join(WINDOW),
+            serde_json::to_string_pretty(&info)?,
+        )?;
         Ok(())
     }
 
     pub fn insert_app(&self, data: AppData) -> Result<()> {
         let windows = data.windows.get_untracked();
-        if windows.is_empty() {
-            // insert_app is called after window is closed, so we don't want to store it
-            return Ok(());
+        for window in windows.values() {
+            self.insert_window(window.clone())?;
         }
-        for (_, window) in &windows {
-            if let Err(err) = self.insert_window(window.clone()) {
-                tracing::error!("{:?}", err);
-            }
+        if let Some(window) = windows
+            .get(&data.active_window.get_untracked())
+            .or_else(|| windows.values().next())
+        {
+            self.insert_window_info(window.info())?;
         }
-        let info = AppInfo {
-            windows: windows
-                .iter()
-                .map(|(_, window_data)| window_data.info())
-                .collect(),
-        };
-        self.insert_app_info(info)?;
         Ok(())
-    }
-
-    pub fn get_app(&self) -> Result<AppInfo> {
-        let info = std::fs::read_to_string(self.folder.join(APP))?;
-        let mut info: AppInfo = serde_json::from_str(&info)?;
-        for window in info.windows.iter_mut() {
-            if window.size.width < 10.0 {
-                window.size.width = 800.0;
-            }
-            if window.size.height < 10.0 {
-                window.size.height = 600.0;
-            }
-        }
-        Ok(info)
     }
 
     pub fn get_window(&self) -> Result<WindowInfo> {
@@ -261,24 +179,12 @@ impl LapceDb {
     }
 
     pub fn save_window(&self, data: WindowData) -> Result<()> {
-        for (_, window_tab) in data.window_tabs.get_untracked().into_iter() {
-            if let Err(err) = self.save_window_tab(window_tab) {
-                tracing::error!("{:?}", err);
-            }
-        }
-        Ok(())
+        self.save_window_tab(data.session.get_untracked())
     }
 
     pub fn insert_window(&self, data: WindowData) -> Result<()> {
-        for (_, window_tab) in data.window_tabs.get_untracked().into_iter() {
-            if let Err(err) = self.insert_window_tab(window_tab) {
-                tracing::error!("{:?}", err);
-            }
-        }
-        let info = data.info();
-        let info = serde_json::to_string_pretty(&info)?;
-        std::fs::write(self.folder.join(WINDOW), info)?;
-        Ok(())
+        self.insert_window_tab(data.session.get_untracked())?;
+        self.insert_window_info(data.info())
     }
 
     pub fn insert_window_tab(&self, data: Rc<WindowTabData>) -> Result<()> {

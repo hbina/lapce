@@ -244,6 +244,7 @@ pub fn launch() -> Result<(), Box<dyn std::error::Error>> {
     .run()?;
     Ok(())
 }
+
 #[cfg(test)]
 mod tests {
     use super::*;

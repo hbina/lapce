@@ -5,7 +5,7 @@ The proxy owns those processes and routes language results to each frontend.
 There is no Volt marketplace, package installation, WASM runtime, or general
 executable-extension protocol.
 
-For the Floem desktop, add this to your user settings or workspace
+For the Floem desktop, add this to your user settings or root-folder
 `.lapce/settings.toml`, using the absolute path to an installed executable:
 
 ```toml
@@ -18,9 +18,9 @@ options = { cargo = { buildScripts = { enable = false } }, procMacro = { enable 
 
 Each entry selects a language, an executable, optional arguments, and optional
 LSP initialization options. Add another `[[lapce-native-lsp.servers]]` entry for
-another server. Reopen the workspace after changing server configuration.
+another server. Reopen the window after changing server configuration.
 Executables must already be installed and executable on the backend host; Lapce
-does not download them or change their permissions. For SSH workspaces, use paths
+does not download them or change their permissions. For SSH sessions, use paths
 on the remote host.
 
 The iced frontend exposes a Rust server through its `--lsp` argument:

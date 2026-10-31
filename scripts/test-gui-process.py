@@ -129,7 +129,7 @@ with (root/'gui-output.log').open('w') as log:
         old_pid = proxy_pid()
         tap('F1')
         time.sleep(.5)
-        for character in 'restart workspace backend':
+        for character in 'restart backend':
             tap('space' if character == ' ' else character)
             time.sleep(.01)
         time.sleep(.5)

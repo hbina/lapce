@@ -9,7 +9,6 @@ pub enum PaletteKind {
     FileChooser,
     Line,
     Command,
-    Workspace,
     Reference,
     DocumentSymbol,
     WorkspaceSymbol,
@@ -34,7 +33,6 @@ impl PaletteKind {
             PaletteKind::DocumentSymbol => "@",
             PaletteKind::WorkspaceSymbol => "#",
             // PaletteKind::GlobalSearch => "?",
-            PaletteKind::Workspace => ">",
             PaletteKind::Command => ":",
             PaletteKind::TerminalProfile => "<",
             PaletteKind::File
@@ -58,7 +56,6 @@ impl PaletteKind {
             _ if input.starts_with('/') => PaletteKind::Line,
             _ if input.starts_with('@') => PaletteKind::DocumentSymbol,
             _ if input.starts_with('#') => PaletteKind::WorkspaceSymbol,
-            _ if input.starts_with('>') => PaletteKind::Workspace,
             _ if input.starts_with(':') => PaletteKind::Command,
             _ if input.starts_with('<') => PaletteKind::TerminalProfile,
             _ => PaletteKind::File,
@@ -76,7 +73,6 @@ impl PaletteKind {
             PaletteKind::WorkspaceSymbol => {
                 Some(LapceWorkbenchCommand::PaletteWorkspaceSymbol)
             }
-            PaletteKind::Workspace => Some(LapceWorkbenchCommand::PaletteWorkspace),
             PaletteKind::Command => Some(LapceWorkbenchCommand::PaletteCommand),
             PaletteKind::File => Some(LapceWorkbenchCommand::Palette),
             PaletteKind::FileChooser => None,
@@ -126,7 +122,6 @@ impl PaletteKind {
             | PaletteKind::DiffFiles => input,
             PaletteKind::PaletteHelp
             | PaletteKind::Command
-            | PaletteKind::Workspace
             | PaletteKind::DocumentSymbol
             | PaletteKind::WorkspaceSymbol
             | PaletteKind::Line

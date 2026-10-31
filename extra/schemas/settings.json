@@ -170,11 +170,11 @@
             "properties": {
                 "backend-socket": {
                     "type": "string",
-                    "description": "Shared backend Unix socket; overrides executable. Reopen workspace after changing."
+                    "description": "Shared backend Unix socket; overrides executable. Reopen the window after changing."
                 },
                 "backend-executable": {
                     "type": "string",
-                    "description": "Local backend executable; empty uses the build default. Reopen the workspace after changing."
+                    "description": "Local backend executable; empty uses the build default. Reopen the window after changing."
                 },
                 "modal": {
                     "type": "boolean"

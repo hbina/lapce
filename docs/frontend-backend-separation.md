@@ -25,6 +25,14 @@ Explicit process, shared-socket, and SSH backend transports remain supported.
 See [startup and logging](startup-and-logging.md). Historical startup notes below
 that describe detached launches or iced's process default no longer apply.
 
+Each desktop window now owns one root folder and one backend session. Workspace
+tabs, switching, recent-workspace palettes, timestamps, and saved workspace lists
+have been removed. CLI paths resolve to a single common root; a launch with no
+paths uses the current directory. Other folders and SSH roots open independent
+windows. Internal workspace types now describe only a root and transport; LSP
+workspace operations and per-root layout caching remain. Historical notes below
+about multiple workspace tabs or their persistence no longer apply.
+
 The architectural goal is independence from the frontend UI library, not a
 requirement to run separate processes. Embedding the backend remains a valid
 deployment option if communication stays behind the queue/protocol boundary.

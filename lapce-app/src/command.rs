@@ -206,12 +206,8 @@ pub enum LapceWorkbenchCommand {
     DisableModal,
 
     #[strum(serialize = "open_folder")]
-    #[strum(message = "Open Folder")]
+    #[strum(message = "Open Folder in New Window")]
     OpenFolder,
-
-    #[strum(serialize = "close_folder")]
-    #[strum(message = "Close Folder")]
-    CloseFolder,
 
     #[strum(serialize = "open_file")]
     #[strum(message = "Open File")]
@@ -329,14 +325,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Reset Zoom")]
     ZoomReset,
 
-    #[strum(serialize = "close_window_tab")]
-    #[strum(message = "Close Current Window Tab")]
-    CloseWindowTab,
-
-    #[strum(serialize = "new_window_tab")]
-    #[strum(message = "Create New Window Tab")]
-    NewWindowTab,
-
     #[strum(serialize = "new_terminal_tab")]
     #[strum(message = "Create New Terminal Tab")]
     NewTerminalTab,
@@ -353,20 +341,12 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Previous Terminal Tab")]
     PreviousTerminalTab,
 
-    #[strum(serialize = "next_window_tab")]
-    #[strum(message = "Go To Next Window Tab")]
-    NextWindowTab,
-
-    #[strum(serialize = "previous_window_tab")]
-    #[strum(message = "Go To Previous Window Tab")]
-    PreviousWindowTab,
-
     #[strum(serialize = "reload_window")]
     #[strum(message = "Reload Window")]
     ReloadWindow,
 
     #[strum(serialize = "restart_backend")]
-    #[strum(message = "Restart Workspace Backend")]
+    #[strum(message = "Restart Backend")]
     RestartBackend,
 
     #[strum(message = "New Window")]
@@ -408,10 +388,6 @@ pub enum LapceWorkbenchCommand {
     #[strum(message = "Command Palette")]
     #[strum(serialize = "palette.command")]
     PaletteCommand,
-
-    #[strum(message = "Open Recent Workspace")]
-    #[strum(serialize = "palette.workspace")]
-    PaletteWorkspace,
 
     #[strum(message = "Source Control: Checkout")]
     #[strum(serialize = "palette.scm_references")]
@@ -740,18 +716,8 @@ pub enum InternalCommand {
 
 #[derive(Clone)]
 pub enum WindowCommand {
-    SetWorkspace {
-        workspace: LapceWorkspace,
-    },
-    CloseWorkspaceTab {
-        index: Option<usize>,
-    },
-    NewWorkspaceTab {
-        workspace: LapceWorkspace,
-        end: bool,
-    },
-    NextWorkspaceTab,
-    PreviousWorkspaceTab,
+    OpenRootWindow { root: LapceWorkspace },
+    ReloadRoot,
     NewWindow,
     CloseWindow,
 }
@@ -759,6 +725,29 @@ pub enum WindowCommand {
 #[cfg(test)]
 mod code_browser_tests {
     use super::*;
+
+    #[test]
+    fn workspace_management_commands_are_removed_but_root_navigation_remains() {
+        for name in [
+            "new_window_tab",
+            "close_window_tab",
+            "next_window_tab",
+            "previous_window_tab",
+            "palette.workspace",
+            "close_folder",
+        ] {
+            assert!(name.parse::<LapceWorkbenchCommand>().is_err(), "{name}");
+        }
+        for name in [
+            "open_folder",
+            "open_file",
+            "new_window",
+            "restart_backend",
+            "palette.workspace_symbol",
+        ] {
+            assert!(name.parse::<LapceWorkbenchCommand>().is_ok(), "{name}");
+        }
+    }
 
     #[test]
     fn browsing_commands_remain_available_and_write_actions_are_hidden() {
