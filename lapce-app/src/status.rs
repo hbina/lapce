@@ -109,7 +109,7 @@ pub fn status(
                 let fg = config.color(fg);
 
                 s.display(display)
-                    .padding_horiz(10.0)
+                    .padding_horiz(6.0)
                     .color(fg)
                     .background(bg)
                     .height_pct(100.0)
@@ -124,7 +124,7 @@ pub fn status(
                         .color(config.color(LapceColor::LAPCE_ICON_ACTIVE))
                 }),
                 label(branch).style(move |s| {
-                    s.margin_left(10.0)
+                    s.margin_left(6.0)
                         .color(config.get().color(LapceColor::STATUS_FOREGROUND))
                         .selectable(false)
                 }),
@@ -136,7 +136,7 @@ pub fn status(
                     Display::Flex
                 })
                 .height_pct(100.0)
-                .padding_horiz(10.0)
+                .padding_horiz(6.0)
                 .align_items(Some(AlignItems::Center))
                 .hover(|s| {
                     s.cursor(CursorStyle::Pointer).background(
@@ -205,16 +205,15 @@ pub fn status(
                     panel.show_panel(&PanelKind::Problem);
                 })
                 .style(move |s| {
-                    s.height_pct(100.0)
-                        .padding_horiz(10.0)
-                        .items_center()
-                        .hover(|s| {
+                    s.height_pct(100.0).padding_horiz(6.0).items_center().hover(
+                        |s| {
                             s.cursor(CursorStyle::Pointer).background(
                                 config
                                     .get()
                                     .color(LapceColor::PANEL_HOVERED_BACKGROUND),
                             )
-                        })
+                        },
+                    )
                 })
             },
             progress_view(config, progresses),
@@ -453,7 +452,7 @@ fn status_text<S: std::fmt::Display + 'static>(
 
         s.display(display)
             .height_full()
-            .padding_horiz(10.0)
+            .padding_horiz(6.0)
             .items_center()
             .color(config.color(LapceColor::STATUS_FOREGROUND))
             .hover(|s| {

@@ -60,8 +60,10 @@ pub fn foldable_panel_section(
             header.style(|s| s.align_items(AlignItems::Center).padding_left(3.0)),
         ))
         .style(move |s| {
-            s.padding_horiz(10.0)
-                .padding_vert(6.0)
+            s.padding_horiz(6.0)
+                .padding_vert(2.0)
+                .min_height(config.get().ui.header_height() as f32)
+                .items_center()
                 .width_pct(100.0)
                 .cursor(CursorStyle::Pointer)
                 .background(config.get().color(LapceColor::EDITOR_BACKGROUND))
@@ -520,8 +522,10 @@ pub fn panel_header(
     config: ReadSignal<Arc<LapceConfig>>,
 ) -> impl View {
     container(label(move || header.clone())).style(move |s| {
-        s.padding_horiz(10.0)
-            .padding_vert(6.0)
+        s.padding_horiz(6.0)
+            .padding_vert(2.0)
+            .min_height(config.get().ui.header_height() as f32)
+            .items_center()
             .width_pct(100.0)
             .background(config.get().color(LapceColor::EDITOR_BACKGROUND))
     })
@@ -630,7 +634,7 @@ fn panel_picker(
                         )
                 }),
             )))
-            .style(|s| s.padding(6.0))
+            .style(|s| s.padding(4.0))
         },
     )
     .style(move |s| {

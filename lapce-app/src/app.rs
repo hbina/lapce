@@ -604,7 +604,7 @@ fn editor_tab_header(
                             )
                     })
             })
-            .style(|s| s.padding(4.));
+            .style(|s| s.padding(3.));
 
             let tab_content = tooltip(
                 label(move || info.with(|info| info.name.clone())).style(move |s| {
@@ -698,8 +698,8 @@ fn editor_tab_header(
                     .border_left(if i.get() == 0 { 1.0 } else { 0.0 })
                     .border_right(1.0)
                     .border_color(config.get().color(LapceColor::LAPCE_BORDER))
-                    .padding_horiz(6.)
-                    .gap(6.)
+                    .padding_horiz(4.)
+                    .gap(4.)
                     .grid()
                     .grid_template_columns(vec![auto(), fr(1_f32), auto()])
                     .apply_if(
@@ -927,7 +927,7 @@ fn editor_tab_header(
                         || "Previous Tab",
                         config,
                     )
-                    .style(|s| s.margin_horiz(6.0).margin_vert(7.0)),
+                    .style(|s| s.margin_horiz(4.0).margin_vert(2.0)),
                     clickable_icon(
                         || LapceIcons::TAB_NEXT,
                         move || {
@@ -939,7 +939,7 @@ fn editor_tab_header(
                         || "Next Tab",
                         config,
                     )
-                    .style(|s| s.margin_right(6.0)),
+                    .style(|s| s.margin_right(4.0)),
                 ))
                 .on_resize(move |rect| {
                     size.set(rect.size());
@@ -1028,7 +1028,7 @@ fn editor_tab_header(
                         || "Split Horizontally",
                         config,
                     )
-                    .style(|s| s.margin_left(6.0)),
+                    .style(|s| s.margin_left(4.0)),
                     clickable_icon(
                         || LapceIcons::CLOSE,
                         move || {
@@ -1043,7 +1043,7 @@ fn editor_tab_header(
                         || "Close All",
                         config,
                     )
-                    .style(|s| s.margin_horiz(6.0)),
+                    .style(|s| s.margin_horiz(4.0)),
                 ))
                 .on_resize(move |rect| {
                     size.set(rect.size());
@@ -1959,8 +1959,8 @@ pub fn clickable_icon_base(
     .disabled(disabled_fn)
     .style(move |s| {
         let config = config.get();
-        s.padding(4.0)
-            .border_radius(6.0)
+        s.padding(3.0)
+            .border_radius(4.0)
             .border(1.0)
             .border_color(Color::TRANSPARENT)
             .apply_if(active_fn(), |s| {

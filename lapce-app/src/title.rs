@@ -110,7 +110,7 @@ fn left(
                 }
             };
             s.height_pct(100.0)
-                .padding_horiz(10.0)
+                .padding_horiz(6.0)
                 .items_center()
                 .background(color)
                 .hover(|s| {
@@ -214,9 +214,8 @@ fn middle(
                             .color(config.color(LapceColor::LAPCE_ICON_ACTIVE))
                     },
                 ),
-                label(move || local_workspace.display()).style(|s| {
-                    s.padding_left(10).padding_right(5).selectable(false)
-                }),
+                label(move || local_workspace.display())
+                    .style(|s| s.padding_left(6).padding_right(4).selectable(false)),
                 open_folder(),
             ))
             .style(|s| s.align_items(Some(AlignItems::Center))),
@@ -231,12 +230,14 @@ fn middle(
                 .flex_grow(10.0f32)
                 .min_width(200.0)
                 .max_width(500.0)
-                .height(26.0)
+                .min_height(
+                    (config.ui.icon_size().max(config.ui.font_size()) + 10) as f32,
+                )
                 .justify_content(Some(JustifyContent::Center))
                 .align_items(Some(AlignItems::Center))
                 .border(1.0)
                 .border_color(config.color(LapceColor::LAPCE_BORDER))
-                .border_radius(6.0)
+                .border_radius(4.0)
                 .background(config.color(LapceColor::EDITOR_BACKGROUND))
         }),
         stack((drag_window_area(empty())
@@ -405,7 +406,11 @@ pub fn title(window_tab_data: Rc<WindowTabData>) -> impl View {
     .style(move |s| {
         let config = config.get();
         s.width_pct(100.0)
-            .height(37.0)
+            .height(
+                (config.ui.header_height() + 4)
+                    .max(config.ui.icon_size().max(config.ui.font_size()) + 14)
+                    as f32,
+            )
             .items_center()
             .background(config.color(LapceColor::PANEL_BACKGROUND))
             .border_bottom(1.0)
@@ -430,7 +435,7 @@ pub fn window_controls_view(
             || "Minimize",
             config,
         )
-        .style(|s| s.margin_right(16.0).margin_left(10.0)),
+        .style(|s| s.margin_right(8.0).margin_left(6.0)),
         clickable_icon(
             move || {
                 if window_maximized.get() {
@@ -449,7 +454,7 @@ pub fn window_controls_view(
             || "Maximize",
             config,
         )
-        .style(|s| s.margin_right(16.0)),
+        .style(|s| s.margin_right(8.0)),
         clickable_icon(
             || LapceIcons::WINDOW_CLOSE,
             move || {

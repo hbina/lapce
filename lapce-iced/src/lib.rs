@@ -123,71 +123,82 @@ impl Browser {
         Task::none()
     }
     fn view(&self) -> Element<'_, Message> {
-        let mut files = column![text("EXPLORER").size(12)].spacing(2);
+        let mut files = column![text("EXPLORER").size(12)].spacing(0);
         if !self.snapshot.directory.as_os_str().is_empty() {
             files = files.push(self.tree_row(&self.snapshot.directory, true, 0));
         }
         for (entry, depth) in self.snapshot.tree.rows(&self.snapshot.directory) {
             files = files.push(self.tree_row(&entry.path, entry.is_dir, depth));
         }
-        let mut open_files = row![].spacing(4);
+        let mut open_files = row![].spacing(2);
         for path in &self.snapshot.open_files {
             open_files = open_files.push(
                 button(text(path.to_string_lossy().into_owned()))
+                    .padding([3, 6])
                     .on_press(Message::Send(Command::Open(path.clone()))),
             );
         }
-        let mut results = column![text(&self.snapshot.diagnostics)].spacing(4);
+        let mut results = column![text(&self.snapshot.diagnostics)].spacing(2);
         for (path, line, label) in &self.snapshot.results {
             results = results.push(
                 button(text(format!("{}:{}  {}", path.display(), line + 1, label)))
+                    .padding([2, 6])
                     .on_press(Message::Send(Command::Jump(path.clone(), *line))),
             );
         }
         results = results.push(text(&self.snapshot.detail));
         container(
             column![
-                text("Lapce / iced — read-only code browser").size(22),
+                text("Lapce / iced — read-only code browser").size(14),
                 row![
                     text_input("File path", &self.path_input)
+                        .padding([3, 6])
                         .on_input(Message::Path)
                         .on_submit(Message::Open),
-                    button("Open").on_press(Message::Open)
+                    button("Open").padding([3, 6]).on_press(Message::Open)
                 ]
-                .spacing(8),
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
                 row![
                     text_input("Workspace search", &self.query)
+                        .padding([3, 6])
                         .on_input(Message::Query)
                         .on_submit(Message::Search),
-                    button("Search").on_press(Message::Search),
+                    button("Search").padding([3, 6]).on_press(Message::Search),
                     button("Definition")
+                        .padding([3, 6])
                         .on_press(Message::Navigate(worker::Navigation::Definition)),
                     button("References")
+                        .padding([3, 6])
                         .on_press(Message::Navigate(worker::Navigation::References)),
                     button("Hover")
+                        .padding([3, 6])
                         .on_press(Message::Navigate(worker::Navigation::Hover)),
                     button("Symbols")
+                        .padding([3, 6])
                         .on_press(Message::Navigate(worker::Navigation::Symbols))
                 ]
-                .spacing(8),
+                .spacing(4)
+                .align_y(iced::Alignment::Center),
                 scrollable(open_files).direction(scrollable::Direction::Horizontal(
                     scrollable::Scrollbar::new()
                 )),
                 row![
-                    scrollable(files).width(240).height(Length::Fill),
+                    scrollable(files).width(220).height(Length::Fill),
                     text_editor(&self.content)
                         .on_action(Message::Action)
                         .font(iced::Font::MONOSPACE)
+                        .size(16)
                         .height(Length::Fill)
                 ]
-                .spacing(10)
+                .spacing(6)
                 .height(Length::Fill),
-                scrollable(results).height(150),
-                text(format!("{}  {}", self.snapshot.status, self.error)),
+                scrollable(results).height(110),
+                text(format!("{}  {}", self.snapshot.status, self.error)).size(12),
             ]
-            .spacing(10),
+            .spacing(4),
         )
-        .padding(12)
+        .padding(6)
         .into()
     }
 
@@ -217,9 +228,9 @@ impl Browser {
         };
         let selected = !is_dir && path == self.snapshot.path;
         let entry =
-            button(row![text(marker).width(14), text(name.into_owned())].spacing(4))
+            button(row![text(marker).width(12), text(name.into_owned())].spacing(2))
                 .on_press(Message::Send(command))
-                .padding([4, 6])
+                .padding([2, 4])
                 .style(if selected {
                     button::primary
                 } else {
@@ -228,7 +239,7 @@ impl Browser {
                 .width(Length::Fill);
         container(entry)
             .padding(iced::Padding {
-                left: (depth * 16) as f32,
+                left: (depth * 12) as f32,
                 ..Default::default()
             })
             .width(Length::Fill)
@@ -277,6 +288,10 @@ pub fn launch() -> Result<(), Box<dyn std::error::Error>> {
         Browser::view,
     )
     .title("Lapce iced — read-only")
+    .settings(iced::Settings {
+        default_text_size: 13.into(),
+        ..Default::default()
+    })
     .subscription(|_| -> Subscription<Message> {
         iced::time::every(Duration::from_millis(50)).map(|_| Message::Tick)
     })
