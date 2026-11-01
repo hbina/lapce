@@ -49,8 +49,14 @@ Start that host with `lapce-client/examples/shared_host.rs`; the terminal fronte
 can attach to the same socket. The host controls the workspace and language-server
 configuration in socket mode; `--lsp` configures the embedded backend or an explicitly launched proxy.
 
-This first frontend has a single file pane, basic directory browsing and plain
-monospace text. It does not yet provide syntax highlighting, navigation history,
+This frontend has a single file pane, basic directory browsing and Rust/Python
+syntax highlighting computed by the backend. Both grammars and highlight queries
+are embedded; no grammar download, installed query files or language server is
+required. Other languages display plain text. Semantic highlighting enriches the
+same backend result when a configured server supports it. See
+[backend highlighting](../docs/backend-highlighting.md).
+
+It does not yet provide navigation history,
 desktop settings/persistence, SSH selection, terminal UI or backend restart.
 It demonstrates reuse of the shared engine; desktop orchestration consolidation
 and complete feature parity remain separate work.

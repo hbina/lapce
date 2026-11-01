@@ -2,6 +2,7 @@
 """Check declared crate boundaries without fetching or building dependencies."""
 import argparse
 import json
+import re
 import subprocess
 import tomllib
 from pathlib import Path
@@ -65,6 +66,18 @@ assert not (reachable("lapce-iced") & {"lapce-app", "floem"}), \
     "Iced frontend must remain independent of the Floem desktop"
 assert "lapce-proxy" not in {d["name"] for d in dependencies("lapce-iced")}, \
     "Iced frontend must connect through lapce-client"
+# Syntax classification executes behind the backend transport, including hovers.
+# Frontends retain Syntax only as a container for received presentation metadata.
+for package in ("lapce-app", "lapce-iced", "lapce-engine"):
+    for source in (root / package / "src").rglob("*.rs"):
+        body = source.read_text()
+        forbidden = re.search(r"Syntax::(?:init|from_language|plaintext)\s*\(|syntax\.parse\s*\(|\b(?:syntax_job|accept_syntax)\s*\(|\bBracketParser\b", body)
+        assert not forbidden, f"Frontend schedules local syntax computation: {source}:{forbidden.group() if forbidden else ''}"
+assert not (root / "lapce-app/src/app/grammars.rs").exists(), "Runtime grammar downloads returned"
+core_dependencies = {dependency["name"] for dependency in dependencies("lapce-core")}
+assert {"tree-sitter-rust", "tree-sitter-python"} <= core_dependencies, "Missing embedded grammars"
+assert "libloading" not in core_dependencies, "Core must not dynamically load grammars"
+
 if args.resolved:
     for frontend in ("lapce-client", "lapce-app", "lapce-iced"):
         tree = subprocess.check_output(

@@ -1,5 +1,14 @@
 # Frontend/backend separation
 
+## Backend-owned syntax highlighting
+
+Rust and Python parsers/queries are compiled into the application dependency graph.
+`lapce-proxy` owns parsing, semantic-token enrichment, bracket coloring and cached
+structural navigation answers. Floem and iced receive versioned scopes through the
+same backend connection; neither frontend schedules syntax parsing, including
+hover code blocks. Grammar downloads and filesystem grammar/query loading are
+removed. See [the highlighting protocol and validation](backend-highlighting.md).
+
 ## Current product direction
 
 The user has refocused Lapce as an always-read-only, navigable code browser with
@@ -658,24 +667,10 @@ same engine model before views are notified.
 Annotation tests cover UTF-16 validation, inlay ordering and stale responses,
 engine-owned inlay transformations, and Unicode preview movement/consumption.
 Modal editing tests cover read-only documents and shared undo history.
-Syntax-job tests cover ownership, cancellation, completed stale results, edits,
-and same-revision syntax replacement. Adapter tests verify notifications occur
-only after acceptance. These validate lifecycle rules; they do not assert
-language-specific grammar output or every parser runtime.
-Diagnostic tests cover deferred mapping, Unicode offsets, edit transformations,
-severity filtering, clearing and stale version rejection. Adapter tests verify
-shared consumer state and separation of panel expansion from semantic updates.
-Source-control tests cover metadata refreshes, selected-path persistence, commit
-validation, message trimming, duplicate suppression, stale/foreign replies,
-retry after failure and preservation of changed commit messages without a GUI.
-The client integration test also commits a temporary repository through backend
-RPC, checks the resulting Git history and verifies an acknowledged non-repository
-error. Checkout, discard and initialization also use acknowledged requests and an
-engine-owned operation queue. They are mutually exclusive with commits, and a
-failed rename restore prevents dispatching the subsequent trash step. Runtime
-checks cover file discard, detached revision checkout and invalid references.
-Coordination with unsaved open documents and broader GUI runtime coverage remain
-outstanding.
+Backend highlighting tests cover embedded Rust/Python output, stale snapshots,
+shared parsing, delayed semantic results and structural navigation equivalence.
+Adapter tests verify notifications after acceptance and style-only redraws.
+See [backend highlighting](backend-highlighting.md) for the current test commands.
 
 Save tests cover policy eligibility, scratch/file transitions, normalization flags,
 autosave identity/revision deadlines, single-winner formatting completion,

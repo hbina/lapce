@@ -20,7 +20,7 @@ We do not track plugins development here, each plugin should have own issue trac
 
 ### Syntax highlighting
 
-There is main issue for tracking syntax highlighting grammars support at https://github.com/lapce/lapce/issues/272.
+Rust and Python highlighting grammars and queries are compiled in. Syntax computation runs in the backend; both frontends consume versioned scopes. See [backend highlighting](docs/backend-highlighting.md) for ownership, protocol and tests.
 
 ---
 
